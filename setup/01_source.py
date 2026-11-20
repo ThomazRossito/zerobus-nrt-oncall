@@ -14,6 +14,7 @@ Usage, from the project root with the conda env active (conda activate zerobus-n
   python setup/01_source.py create    creates what is missing and seeds the service catalog (checkout 2.4.0)
   python setup/01_source.py alerts    loads cmdb.alerts_history (10 million rows) for the Debezium test of Phase 2
   python setup/01_source.py reset     puts the catalog back in the initial state after an interrupted run
+  python setup/01_source.py drop-slot NAME   drops an inactive replication slot, which holds WAL until dropped
 
 Reads from .env: PG_HOST, PG_PORT, PG_DBNAME, PG_USER, PG_PASSWORD, PG_USER_ADMIN and PG_PASSWORD_ADMIN.
 The output shows no host, user names or passwords, so it is safe to paste in a chat.
@@ -28,7 +29,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.common import (ROOT, fail, info, missing, ok, pg_connect, pg_error, read_env, section,  # noqa: E402
                         summary, warn)
-from sim.scenario import PUBLICATION, SCHEMA, SERVICES  # noqa: E402
+from sim.scenario import PUBLICATION, SCHEMA, SERVICES, SLOT  # noqa: E402
 
 POSTGRES = ("PG_HOST", "PG_PORT", "PG_DBNAME", "PG_USER", "PG_PASSWORD", "PG_USER_ADMIN", "PG_PASSWORD_ADMIN")
 DDL = ROOT / "sql" / "phase1" / "cmdb.sql"
@@ -100,11 +101,15 @@ def check(env: dict[str, str]) -> int:
     info(f"replication slots in use: {len(slots)} of {settings['max_replication_slots']}")
     for name, plugin, slot_database, active, retained in slots:
         where = f"{plugin}, database {slot_database}" if plugin else "physical"
+        held = retained or "0 bytes"
         if active:
-            info(f"  slot {name} ({where}): active, holds {retained or '0 bytes'} of WAL")
+            info(f"  slot {name} ({where}): active, holds {held} of WAL")
+        elif name == SLOT:
+            info(f"  slot {name} ({where}): the project's Debezium slot, inactive while Debezium is stopped; "
+                 f"holds {held} of WAL")
         else:
-            warn(f"slot {name} ({where}): inactive, holds {retained or '0 bytes'} of WAL and keeps holding it "
-                 "until someone reads or drops it")
+            warn(f"slot {name} ({where}): inactive, holds {held} of WAL and keeps holding it until someone reads "
+                 f"or drops it: python setup/01_source.py drop-slot {name}")
     if not exists:
         fail(f"database {database} does not exist: python setup/01_source.py create")
         return summary()
@@ -305,6 +310,33 @@ def reset(env: dict[str, str]) -> int:
     return summary()
 
 
+def drop_slot(env: dict[str, str], name: str) -> int:
+    section("Replication slot")
+    if keys := missing(env, POSTGRES):
+        fail("missing in .env: " + ", ".join(keys))
+        return summary()
+    if (conn := _connect_or_fail(env, "postgres")) is None:
+        return summary()
+    with conn:
+        row = conn.execute(
+            "SELECT database, active, pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) "
+            "FROM pg_replication_slots WHERE slot_name = %s", (name,)).fetchone()
+    if row is None:
+        fail(f"slot {name} does not exist")
+        return summary()
+    slot_database, active, retained = row
+    if active:
+        fail(f"slot {name} is active: stop whatever reads from it first")
+        return summary()
+    # a logical slot is dropped from a connection to its own database, which works on every Postgres version
+    if (conn := _connect_or_fail(env, slot_database or "postgres")) is None:
+        return summary()
+    with conn:
+        conn.execute("SELECT pg_drop_replication_slot(%s)", (name,))
+    ok(f"slot {name} dropped; {retained or '0 bytes'} of WAL no longer held by it")
+    return summary()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="zerobus-nrt-oncall · Phase 1 source")
     actions = parser.add_subparsers(dest="action", required=True)
@@ -313,6 +345,8 @@ def main() -> int:
     load = actions.add_parser("alerts", help="loads cmdb.alerts_history for the Debezium test")
     load.add_argument("--rows", type=int, default=ALERT_ROWS, help=f"rows to load (default {ALERT_ROWS:,})")
     actions.add_parser("reset", help="puts the service catalog back in the initial state")
+    drop = actions.add_parser("drop-slot", help="drops an inactive replication slot")
+    drop.add_argument("name", help="slot name, as check lists it")
     args = parser.parse_args()
     env = read_env()
     if args.action == "check":
@@ -321,6 +355,8 @@ def main() -> int:
         return create(env)
     if args.action == "alerts":
         return alerts(env, args.rows)
+    if args.action == "drop-slot":
+        return drop_slot(env, args.name)
     return reset(env)
 
 

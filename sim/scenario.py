@@ -19,6 +19,7 @@ import random
 
 SCHEMA = "cmdb"
 PUBLICATION = "oncall_cdc"         # the Debezium connector of Phase 2 reads this publication
+SLOT = "oncall_cdc"                # and keeps its position in this replication slot
 
 START_MINUTE = 14 * 60             # scenario second 0 is 14:00 on the narrative clock
 DURATION_S = 20 * 60               # 14:00 to 14:20
