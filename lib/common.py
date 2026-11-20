@@ -6,7 +6,8 @@
 # Created:      2026-11-20
 #
 # -----------------------------------------------------------------------------
-"""Helpers shared by the zerobus-nrt-oncall scripts: .env, output safe to paste in a chat, Databricks and SQL."""
+"""Helpers shared by the zerobus-nrt-oncall scripts: .env, output safe to paste in a chat, Databricks, SQL and
+the local Postgres."""
 from __future__ import annotations
 
 import json
@@ -150,3 +151,26 @@ def sql(w, warehouse_id: str, statement: str, wait_s: int = 300) -> list[list]:
         error = r.status.error.message if r.status.error else r.status.state.value
         raise SqlFailed(scrub(first_line(error)))
     return (r.result.data_array or []) if r.result else []
+
+
+# ---- local Postgres --------------------------------------------------------------------------------------
+
+def pg_connect(env: dict[str, str], dbname: str | None = None, replication_user: bool = False):
+    """Connection to the local Postgres in autocommit: each statement is its own commit, the way CDC sees it.
+
+    Uses PG_USER_ADMIN by default; replication_user=True logs in as PG_USER, the user Debezium connects with.
+    """
+    import psycopg
+    user, password = ("PG_USER", "PG_PASSWORD") if replication_user else ("PG_USER_ADMIN", "PG_PASSWORD_ADMIN")
+    return psycopg.connect(host=env["PG_HOST"], port=int(env["PG_PORT"]), user=env[user], password=env[password],
+                           dbname=dbname or env["PG_DBNAME"], connect_timeout=5, autocommit=True)
+
+
+def pg_error(error: object, env: dict[str, str]) -> str:
+    """First line of a Postgres error, without host, user names or passwords."""
+    text = scrub(first_line(error))
+    keys = ("PG_PASSWORD_ADMIN", "PG_PASSWORD", "PG_USER_ADMIN", "PG_USER", "PG_HOST")
+    values = [(env.get(key), key) for key in keys]
+    for value, key in sorted((v for v in values if v[0]), key=lambda v: len(v[0]), reverse=True):
+        text = text.replace(value, "<hidden>" if "PASSWORD" in key else f"<{key}>")
+    return text
