@@ -1,0 +1,12 @@
+# ------------------------------------------------------------------------------
+# Author:       Thomaz Antonio Rossito Neto
+#               Principal Data Architect & AI Strategy
+#               Databricks Solutions Architect Champion
+# Linkedin:     in/thomaz-antonio-rossito-neto/
+# Created:      2026-11-20
+#
+# -----------------------------------------------------------------------------
+# what the bundle never uploads to the workspace
+.databricks/
+__pycache__/
+*.pyc

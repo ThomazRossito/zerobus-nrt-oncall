@@ -1,0 +1,35 @@
+# ------------------------------------------------------------------------------
+# Author:       Thomaz Antonio Rossito Neto
+#               Principal Data Architect & AI Strategy
+#               Databricks Solutions Architect Champion
+# Linkedin:     in/thomaz-antonio-rossito-neto/
+# Created:      2026-11-20
+#
+# -----------------------------------------------------------------------------
+# zerobus-nrt-oncall · what the project creates in Databricks (Declarative Automation Bundle)
+#
+# Run it through the setup scripts, which read the CLI profile and the catalog from .env:
+#   python setup/00_environment.py bitemporal     # phase 0: AUTO CDC bitemporal test pipeline
+# No workspace.host here: the workspace is the one of the CLI profile.
+# Catalog and schemas stay out of the bundle on purpose: a "bundle destroy" never drops data.
+
+bundle:
+  name: zerobus_nrt_oncall
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog catalog of the project (UC_CATALOG in .env).
+  channel:
+    description: Pipeline channel, CURRENT or PREVIEW.
+    default: CURRENT
+
+targets:
+  dev:
+    default: true
+    # pipelines in development mode (faster start, no retry loop on failure),
+    # without the name prefix that "mode: development" adds
+    presets:
+      pipelines_development: true

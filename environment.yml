@@ -1,0 +1,21 @@
+# ------------------------------------------------------------------------------
+# Author:       Thomaz Antonio Rossito Neto
+#               Principal Data Architect & AI Strategy
+#               Databricks Solutions Architect Champion
+# Linkedin:     in/thomaz-antonio-rossito-neto/
+# Created:      2026-11-20
+#
+# -----------------------------------------------------------------------------
+# conda env create -f environment.yml && conda activate zerobus-nrt-oncall
+# Versions are left loose on purpose: after the first create, "pip freeze" pins what worked.
+name: zerobus-nrt-oncall
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - databricks-sdk
+      - psycopg[binary]
+      - opentelemetry-sdk
+      - opentelemetry-exporter-otlp-proto-grpc
