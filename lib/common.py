@@ -136,10 +136,14 @@ class SqlFailed(Exception):
     pass
 
 
-def sql(w, warehouse_id: str, statement: str, wait_s: int = 300) -> list[list]:
-    """Runs a statement on the SQL warehouse and returns the rows (lists of strings). Waits for the warehouse to start."""
+def sql(w, warehouse_id: str, statement: str, wait_s: int = 300, catalog: str | None = None) -> list[list]:
+    """Runs a statement on the SQL warehouse and returns the rows (lists of strings). Waits for the warehouse to start.
+
+    catalog, when given, is the statement's default catalog, so schema.table names resolve inside it.
+    """
     from databricks.sdk.service.sql import StatementState
-    r = w.statement_execution.execute_statement(statement=statement, warehouse_id=warehouse_id, wait_timeout="30s")
+    r = w.statement_execution.execute_statement(statement=statement, warehouse_id=warehouse_id, wait_timeout="30s",
+                                                catalog=catalog)
     deadline = time.monotonic() + wait_s
     while r.status.state in (StatementState.PENDING, StatementState.RUNNING):
         if time.monotonic() > deadline:

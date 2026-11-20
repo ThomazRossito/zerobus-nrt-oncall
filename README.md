@@ -46,3 +46,20 @@ replication user and the `oncall_cdc` publication. `sim/run.py` plays the on-cal
 scenario minute every 5 s by default) and prints a digest of its events; Phase 1 closes when the second run reports the
 same events as the first. `python setup/01_source.py alerts` loads 10 million rows into `cmdb.alerts_history` for the
 Debezium test of Phase 2.
+
+## Phase 2 (in progress): CDC through Zerobus
+
+```bash
+python setup/02_cdc.py create        # bronze tables and Zerobus grants
+python setup/02_cdc.py check
+conda activate zerobus-nrt-oncall    # in a second terminal
+set -a; source .env; set +a
+bash ingest/debezium/run.sh          # Debezium Server 3.8.0.Alpha2, built from the tag
+```
+
+`ingest/debezium/application.properties` reads every value from the environment, the OAuth secret included. A
+`RegexRouter` sends `<catalog>.cmdb.<table>` to `<catalog>.bronze.<table>`; `timestamptz` columns land as STRING
+and silver converts them. `python setup/02_cdc.py reset --yes` prepares a new initial load.
+
+The terminal shows Debezium's console through `ingest/mask.py`, with URLs, hosts, IDs, e-mails and the Postgres
+user masked, so it can be pasted in an issue or a chat; the full log stays in `ingest/debezium/data/logs/`.
