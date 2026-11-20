@@ -12,8 +12,10 @@
 # It follows the Collector example of "Configure OpenTelemetry" (Databricks docs, last updated 2026-11-18; the Azure page
 # of 2026-09-11 shows the same, with the azuredatabricks.net host): one oauth2client per table, because each token is
 # scoped to one table by its authorization_details. The extension gets the token at start and renews it before it
-# expires (an hour), so nothing here handles tokens. Two changes from the example: the receiver listens on 127.0.0.1
-# only, and the batch timeout comes from OTEL_BATCH_TIMEOUT (5s, the example's value, unless set otherwise).
+# expires (an hour), so nothing here handles tokens. Three changes from the example: the receiver listens on 127.0.0.1
+# only; the batch timeout comes from OTEL_BATCH_TIMEOUT (5s, the example's value, unless set otherwise); and the
+# exporters are otlp_grpc, because otelcol-contrib 0.165.0 warns at start that the example's "otlp" is a deprecated
+# alias of it (seen on the Mac on 2026-11-20).
 #
 # No secret and no host here: every ${env:...} comes from the shell. ingest/otel/run.sh checks the .env variables
 # and derives ZNO_OTLP_ENDPOINT (the Zerobus host, port 443), ZNO_WORKSPACE_ID and ZNO_TOKEN_URL from them.
@@ -61,21 +63,21 @@ processors:
     send_batch_size: 10
 
 exporters:
-  otlp/spans:
+  otlp_grpc/spans:
     endpoint: ${env:ZNO_OTLP_ENDPOINT}
     auth:
       authenticator: oauth2client/spans
     headers:
       x-databricks-zerobus-table-name: '${env:UC_CATALOG}.otel.shop_otel_spans'
 
-  otlp/logs:
+  otlp_grpc/logs:
     endpoint: ${env:ZNO_OTLP_ENDPOINT}
     auth:
       authenticator: oauth2client/logs
     headers:
       x-databricks-zerobus-table-name: '${env:UC_CATALOG}.otel.shop_otel_logs'
 
-  otlp/metrics:
+  otlp_grpc/metrics:
     endpoint: ${env:ZNO_OTLP_ENDPOINT}
     auth:
       authenticator: oauth2client/metrics
@@ -88,12 +90,12 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlp/spans]
+      exporters: [otlp_grpc/spans]
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlp/logs]
+      exporters: [otlp_grpc/logs]
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlp/metrics]
+      exporters: [otlp_grpc/metrics]
