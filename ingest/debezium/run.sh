@@ -17,7 +17,10 @@
 # masked), so it can be pasted in a chat; the full log goes to ingest/debezium/data/logs/. This script never reads
 # .env, never prints a value and never copies the secret: it only checks that each variable is set.
 # Optional knobs for the debezium/dbz#3026 scenarios:
-#   DBZ_MAX_BATCH_SIZE (2048), DBZ_MAX_QUEUE_SIZE (8192), ZEROBUS_FLUSH_WARN_MS (30000), ZEROBUS_METRICS_LOG_INTERVAL (0)
+#   DBZ_MAX_BATCH_SIZE (2048), DBZ_MAX_QUEUE_SIZE (8192), ZEROBUS_FLUSH_WARN_MS (30000), ZEROBUS_METRICS_LOG_INTERVAL (0),
+#   ZEROBUS_SDK_LOG_LEVEL (WARN), DBZ_SNAPSHOT_MODE (initial), ZEROBUS_MAX_INFLIGHT (50000)
+# After the parallel initial load (ingest/debezium/run_parallel.py), the CDC starts without a new snapshot:
+#   DBZ_SNAPSHOT_MODE=no_data bash ingest/debezium/run.sh
 set -eu
 
 here="$(cd "$(dirname "$0")" && pwd)"

@@ -15,7 +15,8 @@ Usage, from the project root with the conda env active (conda activate zerobus-n
   python setup/02_cdc.py reset          shows what a new initial load needs; with --yes it does it: drops the slot,
                                         deletes the offsets and empties the bronze tables (Debezium must be stopped)
 
-Debezium Server runs with ingest/debezium/run.sh. Reads from .env: DATABRICKS_CONFIG_PROFILE, UC_CATALOG, WAREHOUSE_ID,
+Debezium Server runs with ingest/debezium/run.sh, and the initial load in parallel with
+ingest/debezium/run_parallel.py. Reads from .env: DATABRICKS_CONFIG_PROFILE, UC_CATALOG, WAREHOUSE_ID,
 DATABRICKS_CLIENT_ID and the PG_* variables. Never reads DATABRICKS_CLIENT_SECRET.
 The output shows no host, e-mail, IDs or passwords, so it is safe to paste in a chat.
 """
@@ -26,8 +27,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.common import (ROOT, SqlFailed, client, fail, first_line, info, missing, ok, pg_connect,  # noqa: E402
-                        pg_error, read_env, scrub, section, sql, summary)
+from lib.common import (ROOT, SqlFailed, client, fail, first_line, guard, info, missing, ok,  # noqa: E402
+                        pg_connect, pg_error, read_env, scrub, section, sql, summary, warn)
 from sim.scenario import SLOT  # noqa: E402
 
 DATABRICKS = ("DATABRICKS_CONFIG_PROFILE", "UC_CATALOG", "WAREHOUSE_ID", "DATABRICKS_CLIENT_ID")
@@ -36,6 +37,7 @@ DDL = ROOT / "sql" / "phase2" / "bronze.sql"
 DEBEZIUM = ROOT / "ingest" / "debezium"
 DIST = DEBEZIUM / "dist" / "debezium-server"
 OFFSETS = DEBEZIUM / "data" / "offsets.dat"
+PARALLEL = DEBEZIUM / "data" / "parallel"
 CDC_COLUMNS = [("__op", "string"), ("__ts_ms", "bigint"), ("__source_ts_ms", "bigint"), ("__lsn", "bigint"),
                ("__deleted", "string")]
 BRONZE = {
@@ -46,6 +48,9 @@ BRONZE = {
     "alerts_history": [("alert_id", "bigint"), ("service", "string"), ("rule", "string"), ("severity", "string"),
                        ("fired_at", "string"), ("value", "double")],
 }
+# a snapshot (r) holds one row per key: a key seen twice means rows sent twice (a snapshot taken again after a
+# failure, or a batch resent after a lost ack)
+KEYS = {"services": "service", "incidents": "incident_id", "alerts_history": "alert_id"}
 
 
 def statements(path: Path) -> list[str]:
@@ -77,6 +82,16 @@ def _databricks(env: dict[str, str]):
 
 
 # ---- check ------------------------------------------------------------------------------------------------
+
+def offsets_state() -> str:
+    """none, snapshot (an initial snapshot under way or interrupted) or streaming, read from Debezium's offsets file.
+
+    The file is a serialized Java map, but each offset is kept as JSON text, so the snapshot flag can be read as bytes.
+    """
+    if not OFFSETS.exists():
+        return "none"
+    return "snapshot" if b'"snapshot_completed":false' in OFFSETS.read_bytes() else "streaming"
+
 
 def check(env: dict[str, str]) -> int:
     from databricks.sdk.errors import NotFound
@@ -138,6 +153,19 @@ def check(env: dict[str, str]) -> int:
             fail(f"bronze.{table}: __deleted does not match the change type for {', '.join(wrong)}")
         elif deletes:
             ok(f"bronze.{table}: {deletes:,} delete(s) with __deleted = 'true', no other row flagged")
+        key = KEYS[table]
+        try:
+            reads, distinct, low, high = sql(
+                w, warehouse, f"SELECT count_if(__op = 'r'), count(DISTINCT CASE WHEN __op = 'r' THEN {key} END), "
+                              f"min(CASE WHEN __op = 'r' THEN {key} END), max(CASE WHEN __op = 'r' THEN {key} END) "
+                              f"FROM bronze.{table}", catalog=catalog)[0]
+        except SqlFailed as error:
+            fail(f"bronze.{table}: {error}")
+            continue
+        if (repeated := int(reads) - int(distinct)) > 0:
+            warn(f"bronze.{table}: {repeated:,} snapshot row(s) with a repeated {key}: rows sent twice")
+        elif int(reads) and table == "alerts_history":
+            ok(f"bronze.{table}: one snapshot row per {key}, from {int(low):,} to {int(high):,}")
 
     section("Debezium on the Mac")
     jars = sorted((DIST / "lib").glob("debezium-server-databricks-zerobus-*.jar")) if (DIST / "lib").exists() else []
@@ -146,8 +174,15 @@ def check(env: dict[str, str]) -> int:
     else:
         fail("Debezium Server with the Zerobus sink not found in ingest/debezium/dist: build it from the tag")
     (ok if (DEBEZIUM / "application.properties").exists() else fail)("ingest/debezium/application.properties")
-    info("offsets: " + ("ingest/debezium/data/offsets.dat, Debezium resumes from there" if OFFSETS.exists()
-                        else "none yet, the next start takes the initial snapshot"))
+    snapshot = offsets_state()
+    info("offsets: " + {"none": "none yet: the next run.sh takes the initial snapshot (after run_parallel.py, "
+                                "start the CDC with DBZ_SNAPSHOT_MODE=no_data)",
+                        "snapshot": "initial snapshot under way, or stopped before the end (a restart takes it again)",
+                        "streaming": "ingest/debezium/data/offsets.dat, Debezium resumes from there"}[snapshot])
+    runs = sorted(path for path in PARALLEL.iterdir() if path.is_dir()) if PARALLEL.exists() else []
+    if runs:
+        count = len([path for path in runs[-1].iterdir() if path.name.startswith("i")])
+        info(f"parallel load: newest run in ingest/debezium/data/parallel/{runs[-1].name}, {count} instance(s)")
     if keys := missing(env, POSTGRES):
         fail("missing in .env: " + ", ".join(keys))
         return summary()
@@ -162,7 +197,10 @@ def check(env: dict[str, str]) -> int:
     if slot is None:
         info(f"slot {SLOT}: not created yet (Debezium creates it on the first start)")
     else:
-        state = "active, Debezium is running" if slot[0] else "inactive, Debezium is stopped"
+        # Debezium acquires the slot only when it starts streaming, so it shows inactive during the initial snapshot
+        state = ("active, Debezium is streaming" if slot[0] else
+                 "inactive, Debezium is stopped" if snapshot == "streaming" else
+                 "inactive: Debezium is stopped, or still taking the initial snapshot")
         info(f"slot {SLOT}: {state}; holds {slot[1] or '0 bytes'} of WAL")
     return summary()
 
@@ -234,7 +272,8 @@ def reset(env: dict[str, str], yes: bool) -> int:
             ok(f"bronze.{table} emptied")
         except SqlFailed as error:
             fail(f"bronze.{table}: {error}")
-    info("the next start of ingest/debezium/run.sh takes a new initial snapshot")
+    info("next: ingest/debezium/run.sh takes a new initial snapshot, or ingest/debezium/run_parallel.py takes it")
+    info("in parallel")
     return summary()
 
 
@@ -255,4 +294,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(guard(main))

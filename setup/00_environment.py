@@ -35,8 +35,8 @@ from importlib import metadata
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.common import (ROOT, SqlFailed, client, fail, first_line, info, missing, ok, read_env,  # noqa: E402
-                        run, save_local, scrub, section, sql, summary, warn)
+from lib.common import (ROOT, SqlFailed, client, fail, first_line, guard, info, missing, ok,  # noqa: E402
+                        read_env, run, save_local, scrub, section, sql, summary, warn)
 
 SCHEMAS = {
     "otel": "OpenTelemetry signals written by Zerobus (OTLP)",
@@ -472,4 +472,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(guard(main))

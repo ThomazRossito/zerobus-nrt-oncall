@@ -27,8 +27,8 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.common import (ROOT, fail, info, missing, ok, pg_connect, pg_error, read_env, section,  # noqa: E402
-                        summary, warn)
+from lib.common import (ROOT, fail, guard, info, missing, ok, pg_connect, pg_error, read_env,  # noqa: E402
+                        section, summary, warn)
 from sim.scenario import PUBLICATION, SCHEMA, SERVICES, SLOT  # noqa: E402
 
 POSTGRES = ("PG_HOST", "PG_PORT", "PG_DBNAME", "PG_USER", "PG_PASSWORD", "PG_USER_ADMIN", "PG_PASSWORD_ADMIN")
@@ -361,4 +361,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(guard(main))

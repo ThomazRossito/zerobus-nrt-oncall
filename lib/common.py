@@ -11,13 +11,17 @@ the local Postgres."""
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
 import time
+import traceback
+from collections.abc import Callable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+HOME = os.path.expanduser("~")
 COUNTS = {"ok": 0, "warn": 0, "fail": 0}
 
 # no Python script reads the OAuth secret: only Debezium Server and the OTel Collector get it
@@ -35,8 +39,10 @@ _SENSITIVE = [
 
 
 def scrub(text: object) -> str:
-    """Removes URLs, hosts, e-mails and IDs from text that came from outside (API errors, CLI output)."""
+    """Removes URLs, hosts, e-mails, IDs and the home folder from text that came from outside (API errors, CLI)."""
     text = str(text)
+    if len(HOME) > 1:
+        text = text.replace(HOME, "~")
     for pattern, replacement in _SENSITIVE:
         text = pattern.sub(replacement, text)
     return text
@@ -77,6 +83,25 @@ def info(msg: str) -> None:
 def summary() -> int:
     print(f"\nsummary: {COUNTS['ok']} ok, {COUNTS['warn']} warning(s), {COUNTS['fail']} failure(s)")
     return 1 if COUNTS["fail"] else 0
+
+
+def guard(main: Callable[[], int]) -> int:
+    """Runs a script's main and turns an error that nothing else caught into one FAIL line.
+
+    A raw traceback shows the workspace host, the home folder and the Python install. The FAIL line keeps the error
+    type, the project file and line where it happened and the scrubbed message, so the output can still be pasted.
+    """
+    try:
+        return main()
+    except KeyboardInterrupt:
+        print("\ninterrupted")
+        return 130
+    except Exception as error:  # noqa: BLE001 - the last stop before a raw traceback
+        ours = [(Path(frame.filename).resolve(), frame.lineno) for frame in traceback.extract_tb(error.__traceback__)]
+        ours = [(path, line) for path, line in ours if path.is_relative_to(ROOT)]
+        where = f" at {ours[-1][0].relative_to(ROOT)}:{ours[-1][1]}" if ours else ""
+        fail(f"{type(error).__name__}{where}: {scrub(first_line(error))}")
+        return summary()
 
 
 # ---- .env and local state -------------------------------------------------------------------------------
@@ -140,17 +165,26 @@ def sql(w, warehouse_id: str, statement: str, wait_s: int = 300, catalog: str | 
     """Runs a statement on the SQL warehouse and returns the rows (lists of strings). Waits for the warehouse to start.
 
     catalog, when given, is the statement's default catalog, so schema.table names resolve inside it.
+    Every failure comes back as SqlFailed with a message safe to print, a workspace that does not answer included.
     """
+    from databricks.sdk.errors import DatabricksError
     from databricks.sdk.service.sql import StatementState
-    r = w.statement_execution.execute_statement(statement=statement, warehouse_id=warehouse_id, wait_timeout="30s",
-                                                catalog=catalog)
-    deadline = time.monotonic() + wait_s
-    while r.status.state in (StatementState.PENDING, StatementState.RUNNING):
-        if time.monotonic() > deadline:
-            w.statement_execution.cancel_execution(r.statement_id)
-            raise SqlFailed(f"took longer than {wait_s} s")
-        time.sleep(1)
-        r = w.statement_execution.get_statement(r.statement_id)
+    try:
+        r = w.statement_execution.execute_statement(statement=statement, warehouse_id=warehouse_id,
+                                                    wait_timeout="30s", catalog=catalog)
+        deadline = time.monotonic() + wait_s
+        while r.status.state in (StatementState.PENDING, StatementState.RUNNING):
+            if time.monotonic() > deadline:
+                w.statement_execution.cancel_execution(r.statement_id)
+                raise SqlFailed(f"took longer than {wait_s} s")
+            time.sleep(1)
+            r = w.statement_execution.get_statement(r.statement_id)
+    # DatabricksError is an OSError too, so it comes first: an API error keeps its (scrubbed) message
+    except DatabricksError as error:
+        raise SqlFailed(scrub(first_line(error))) from None
+    # timeouts and refused connections (requests' errors are OSError); their text names the workspace host
+    except OSError as error:
+        raise SqlFailed(f"the workspace did not answer ({type(error).__name__}); try again in a minute") from None
     if r.status.state != StatementState.SUCCEEDED:
         error = r.status.error.message if r.status.error else r.status.state.value
         raise SqlFailed(scrub(first_line(error)))

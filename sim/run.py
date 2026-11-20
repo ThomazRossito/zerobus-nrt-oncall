@@ -31,7 +31,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.common import ROOT, fail, info, missing, ok, pg_connect, pg_error, read_env, section, summary, warn  # noqa: E402
+from lib.common import (ROOT, fail, guard, info, missing, ok, pg_connect, pg_error, read_env,  # noqa: E402
+                        section, summary, warn)
 from sim.bots import DeployBot, IncidentBot  # noqa: E402
 from sim.scenario import (DEFAULT_SEED, DEFAULT_SPEED, DURATION_S, SERVICES, TIMELINE, clock)  # noqa: E402
 from sim.shop import Shop  # noqa: E402
@@ -216,4 +217,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(guard(main))
