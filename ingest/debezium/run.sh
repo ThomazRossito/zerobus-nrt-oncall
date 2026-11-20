@@ -18,7 +18,7 @@
 # .env, never prints a value and never copies the secret: it only checks that each variable is set.
 # Optional knobs for the debezium/dbz#3026 scenarios:
 #   DBZ_MAX_BATCH_SIZE (2048), DBZ_MAX_QUEUE_SIZE (8192), ZEROBUS_FLUSH_WARN_MS (30000), ZEROBUS_METRICS_LOG_INTERVAL (0),
-#   ZEROBUS_SDK_LOG_LEVEL (WARN), DBZ_SNAPSHOT_MODE (initial), ZEROBUS_MAX_INFLIGHT (50000)
+#   ZEROBUS_SDK_LOG_LEVEL (WARN), DBZ_SNAPSHOT_MODE (initial), ZEROBUS_MAX_INFLIGHT (50000), DBZ_METRICS_PORT (off)
 # After the parallel initial load (ingest/debezium/run_parallel.py), the CDC starts without a new snapshot:
 #   DBZ_SNAPSHOT_MODE=no_data bash ingest/debezium/run.sh
 set -eu
@@ -56,6 +56,18 @@ export DBZ_OFFSETS_FILE="$here/data/offsets.dat"
 # is used. The fabric8 client reads ~/.kube/config, and a context whose CA file is gone stops Debezium from starting.
 # Debezium does not use Kubernetes here, so the client skips the kubeconfig (fabric8: kubernetes.auth.tryKubeConfig).
 export KUBERNETES_AUTH_TRYKUBECONFIG=false
+# DBZ_METRICS_PORT: the distribution's Prometheus JMX exporter on 127.0.0.1:<port>, read by
+# ingest/debezium/watch_flush.py (scenario 6 of debezium/dbz#3026). The distribution's own switch, JMX_EXPORTER_PORT,
+# listens on every interface; JMX_HOST and JMX_PORT would replace JAVA_OPTS, so leave them unset with this one.
+if [ -n "${DBZ_METRICS_PORT:-}" ]; then
+  agent="$(ls "$dist"/lib_metrics/jmx_prometheus_javaagent-*.jar 2>/dev/null | head -1)"
+  if [ -z "$agent" ]; then
+    echo "Prometheus JMX exporter not found in ingest/debezium/dist/debezium-server/lib_metrics"
+    exit 1
+  fi
+  export JAVA_OPTS="-javaagent:$agent=127.0.0.1:$DBZ_METRICS_PORT:config/metrics.yml ${JAVA_OPTS:-}"
+  echo "flush gauges for ingest/debezium/watch_flush.py on 127.0.0.1:$DBZ_METRICS_PORT"
+fi
 log="$here/data/logs/debezium-$(date +%Y%m%d-%H%M%S).log"
 cp "$here/application.properties" "$dist/config/application.properties"
 echo "Debezium Server 3.8.0.Alpha2: cmdb -> Zerobus -> bronze. Ctrl+C stops it."
