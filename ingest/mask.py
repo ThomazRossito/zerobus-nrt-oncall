@@ -40,6 +40,8 @@ PATTERNS = [
     # also after an escaped tab or newline of a JSON log line (\\trole 'name')
     (re.compile(r"(?:(?<=\\[tn])|(?<![A-Za-z0-9_]))(user|role) '[^']*'"), r"\1 '<masked>'"),
     (re.compile(r"/var/folders/[^\s\"'\\]+"), "/var/folders/<masked>"),
+    # a home folder other than this shell's (another user, or HOME not set)
+    (re.compile(r"(?<![\w.])/(?:Users|home)/[^/\s\"'\\]+"), "~"),
 ]
 
 
