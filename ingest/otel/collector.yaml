@@ -1,0 +1,99 @@
+# ------------------------------------------------------------------------------
+# Author:       Thomaz Antonio Rossito Neto
+#               Principal Data Architect & AI Strategy
+#               Databricks Solutions Architect Champion
+# Linkedin:     in/thomaz-antonio-rossito-neto/
+# Created:      2026-11-20
+#
+# -----------------------------------------------------------------------------
+# Phase 2 · OTel Collector (otelcol-contrib) on the Mac: OTLP from the sim on 127.0.0.1:4317 -> Zerobus Ingest (OTLP
+# gRPC on 443) -> <catalog>.otel.shop_otel_spans, shop_otel_logs and shop_otel_metrics.
+#
+# It follows the Collector example of "Configure OpenTelemetry" (Databricks docs, last updated 2026-11-18; the Azure page
+# of 2026-09-11 shows the same, with the azuredatabricks.net host): one oauth2client per table, because each token is
+# scoped to one table by its authorization_details. The extension gets the token at start and renews it before it
+# expires (an hour), so nothing here handles tokens. Two changes from the example: the receiver listens on 127.0.0.1
+# only, and the batch timeout comes from OTEL_BATCH_TIMEOUT (5s, the example's value, unless set otherwise).
+#
+# No secret and no host here: every ${env:...} comes from the shell. ingest/otel/run.sh checks the .env variables
+# and derives ZNO_OTLP_ENDPOINT (the Zerobus host, port 443), ZNO_WORKSPACE_ID and ZNO_TOKEN_URL from them.
+
+extensions:
+  oauth2client/spans:
+    client_id: ${env:DATABRICKS_CLIENT_ID}
+    client_secret: ${env:DATABRICKS_CLIENT_SECRET}
+    token_url: ${env:ZNO_TOKEN_URL}
+    scopes: ['all-apis']
+    endpoint_params:
+      resource: 'api://databricks/workspaces/${env:ZNO_WORKSPACE_ID}/zerobusDirectWriteApi'
+      authorization_details:
+        - '[{"type":"unity_catalog_privileges","privileges":["USE CATALOG"],"object_type":"CATALOG","object_full_path":"${env:UC_CATALOG}"},{"type":"unity_catalog_privileges","privileges":["USE SCHEMA"],"object_type":"SCHEMA","object_full_path":"${env:UC_CATALOG}.otel"},{"type":"unity_catalog_privileges","privileges":["SELECT","MODIFY"],"object_type":"TABLE","object_full_path":"${env:UC_CATALOG}.otel.shop_otel_spans"}]'
+
+  oauth2client/logs:
+    client_id: ${env:DATABRICKS_CLIENT_ID}
+    client_secret: ${env:DATABRICKS_CLIENT_SECRET}
+    token_url: ${env:ZNO_TOKEN_URL}
+    scopes: ['all-apis']
+    endpoint_params:
+      resource: 'api://databricks/workspaces/${env:ZNO_WORKSPACE_ID}/zerobusDirectWriteApi'
+      authorization_details:
+        - '[{"type":"unity_catalog_privileges","privileges":["USE CATALOG"],"object_type":"CATALOG","object_full_path":"${env:UC_CATALOG}"},{"type":"unity_catalog_privileges","privileges":["USE SCHEMA"],"object_type":"SCHEMA","object_full_path":"${env:UC_CATALOG}.otel"},{"type":"unity_catalog_privileges","privileges":["SELECT","MODIFY"],"object_type":"TABLE","object_full_path":"${env:UC_CATALOG}.otel.shop_otel_logs"}]'
+
+  oauth2client/metrics:
+    client_id: ${env:DATABRICKS_CLIENT_ID}
+    client_secret: ${env:DATABRICKS_CLIENT_SECRET}
+    token_url: ${env:ZNO_TOKEN_URL}
+    scopes: ['all-apis']
+    endpoint_params:
+      resource: 'api://databricks/workspaces/${env:ZNO_WORKSPACE_ID}/zerobusDirectWriteApi'
+      authorization_details:
+        - '[{"type":"unity_catalog_privileges","privileges":["USE CATALOG"],"object_type":"CATALOG","object_full_path":"${env:UC_CATALOG}"},{"type":"unity_catalog_privileges","privileges":["USE SCHEMA"],"object_type":"SCHEMA","object_full_path":"${env:UC_CATALOG}.otel"},{"type":"unity_catalog_privileges","privileges":["SELECT","MODIFY"],"object_type":"TABLE","object_full_path":"${env:UC_CATALOG}.otel.shop_otel_metrics"}]'
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:4317
+
+processors:
+  batch:
+    timeout: ${env:OTEL_BATCH_TIMEOUT}
+    send_batch_size: 10
+
+exporters:
+  otlp/spans:
+    endpoint: ${env:ZNO_OTLP_ENDPOINT}
+    auth:
+      authenticator: oauth2client/spans
+    headers:
+      x-databricks-zerobus-table-name: '${env:UC_CATALOG}.otel.shop_otel_spans'
+
+  otlp/logs:
+    endpoint: ${env:ZNO_OTLP_ENDPOINT}
+    auth:
+      authenticator: oauth2client/logs
+    headers:
+      x-databricks-zerobus-table-name: '${env:UC_CATALOG}.otel.shop_otel_logs'
+
+  otlp/metrics:
+    endpoint: ${env:ZNO_OTLP_ENDPOINT}
+    auth:
+      authenticator: oauth2client/metrics
+    headers:
+      x-databricks-zerobus-table-name: '${env:UC_CATALOG}.otel.shop_otel_metrics'
+
+service:
+  extensions: [oauth2client/spans, oauth2client/logs, oauth2client/metrics]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/spans]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/logs]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/metrics]

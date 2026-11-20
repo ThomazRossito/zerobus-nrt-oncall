@@ -8,8 +8,9 @@
 # -----------------------------------------------------------------------------
 """The fictitious shop: checkout, payment and inventory, instrumented with the OpenTelemetry SDK.
 
-Each (service, version) gets its own providers, because service.version is a resource attribute. In Phase 1 the
-exporters write JSON lines to files in the run folder; Phase 2 swaps them for OTLP to the OTel Collector.
+Each (service, version) gets its own providers, because service.version is a resource attribute. The exporters always
+write JSON lines to files in the run folder (Phase 1); with an OTLP endpoint (Phase 2, python sim/run.py --otlp) the
+same telemetry also goes over OTLP gRPC to the OTel Collector, which sends it to Zerobus.
 """
 from __future__ import annotations
 
@@ -21,12 +22,12 @@ from pathlib import Path
 from opentelemetry import trace
 from opentelemetry._logs import SeverityNumber
 from opentelemetry.sdk._logs import LoggerProvider
-from opentelemetry.sdk._logs.export import ConsoleLogRecordExporter, SimpleLogRecordProcessor
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogRecordExporter, SimpleLogRecordProcessor
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import ConsoleMetricExporter, PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter, SimpleSpanProcessor
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
 from sim.scenario import (BAD_RELEASE, BAD_RELEASE_MESSAGE, ERROR_MESSAGES, SERVICES, error_rate, latency_ms,
@@ -35,10 +36,25 @@ from sim.scenario import (BAD_RELEASE, BAD_RELEASE_MESSAGE, ERROR_MESSAGES, SERV
 SCOPE = "zerobus-nrt-oncall.shop"
 # bucket boundaries the HTTP semantic conventions suggest for http.server.request.duration, in seconds
 DURATION_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0)
+# the SDK's batch processors send spans and logs to the Collector every second (their default is 5 s); metrics go at
+# each export of the periodic reader, as with the files
+OTLP_DELAY_MS = 1000
 
 
 def _line(item) -> str:
     return item.to_json(indent=None) + "\n"
+
+
+def _otlp_exporters(endpoint: str) -> tuple:
+    """Span, metric and log exporters over OTLP gRPC, without TLS: the Collector listens on 127.0.0.1 only.
+
+    Imported here, so a run without --otlp does not load gRPC.
+    """
+    from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    return (OTLPSpanExporter(endpoint=endpoint, insecure=True), OTLPMetricExporter(endpoint=endpoint, insecure=True),
+            OTLPLogExporter(endpoint=endpoint, insecure=True))
 
 
 class _LockedFile:
@@ -63,18 +79,25 @@ class _LockedFile:
 
 
 class _Instruments:
-    def __init__(self, service: str, version: str, files: dict[str, _LockedFile], metric_interval_ms: float):
+    def __init__(self, service: str, version: str, files: dict[str, _LockedFile], metric_interval_ms: float,
+                 otlp: str | None = None):
         resource = Resource.create({"service.name": service, "service.version": version, "service.namespace": "shop",
                                     "deployment.environment.name": "demo"})
         self.tracer_provider = TracerProvider(resource=resource, shutdown_on_exit=False)
         self.tracer_provider.add_span_processor(
             SimpleSpanProcessor(ConsoleSpanExporter(out=files["spans"], formatter=_line)))
-        reader = PeriodicExportingMetricReader(ConsoleMetricExporter(out=files["metrics"], formatter=_line),
-                                               export_interval_millis=metric_interval_ms)
-        self.meter_provider = MeterProvider(resource=resource, metric_readers=[reader], shutdown_on_exit=False)
+        readers = [PeriodicExportingMetricReader(ConsoleMetricExporter(out=files["metrics"], formatter=_line),
+                                                 export_interval_millis=metric_interval_ms)]
         self.logger_provider = LoggerProvider(resource=resource, shutdown_on_exit=False)
         self.logger_provider.add_log_record_processor(
             SimpleLogRecordProcessor(ConsoleLogRecordExporter(out=files["logs"], formatter=_line)))
+        if otlp:
+            spans, metrics, logs = _otlp_exporters(otlp)
+            self.tracer_provider.add_span_processor(BatchSpanProcessor(spans, schedule_delay_millis=OTLP_DELAY_MS))
+            readers.append(PeriodicExportingMetricReader(metrics, export_interval_millis=metric_interval_ms))
+            self.logger_provider.add_log_record_processor(
+                BatchLogRecordProcessor(logs, schedule_delay_millis=OTLP_DELAY_MS))
+        self.meter_provider = MeterProvider(resource=resource, metric_readers=readers, shutdown_on_exit=False)
         self.tracer = self.tracer_provider.get_tracer(SCOPE)
         self.duration = self.meter_provider.get_meter(SCOPE).create_histogram(
             "http.server.request.duration", unit="s", description="Duration of HTTP server requests.",
@@ -94,9 +117,10 @@ def _percentile(sorted_values: list[float], fraction: float) -> float:
 class Shop:
     """Generates the requests of each scenario second and keeps the per-minute numbers of the run."""
 
-    def __init__(self, folder: Path, metric_interval_s: float):
+    def __init__(self, folder: Path, metric_interval_s: float, otlp: str | None = None):
         self._files = {signal: _LockedFile(folder / f"{signal}.jsonl") for signal in ("spans", "metrics", "logs")}
         self._metric_interval_ms = metric_interval_s * 1000
+        self._otlp = otlp
         self._instruments: dict[tuple[str, str], _Instruments] = {}
         self.live = {service: spec["version"] for service, spec in SERVICES.items()}
         self.live_since = {service: 0 for service in SERVICES}
@@ -108,7 +132,7 @@ class Shop:
     def _get(self, service: str, version: str) -> _Instruments:
         key = (service, version)
         if key not in self._instruments:
-            self._instruments[key] = _Instruments(service, version, self._files, self._metric_interval_ms)
+            self._instruments[key] = _Instruments(service, version, self._files, self._metric_interval_ms, self._otlp)
         return self._instruments[key]
 
     def deploy(self, service: str, version: str, second: int, at_ns: int) -> None:

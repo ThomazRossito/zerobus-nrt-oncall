@@ -28,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.common import (ROOT, SqlFailed, client, fail, first_line, guard, info, missing, ok,  # noqa: E402
-                        pg_connect, pg_error, read_env, scrub, section, sql, summary, warn)
+                        pg_connect, pg_error, read_env, scrub, section, sql, statements, summary, warn)
 from sim.scenario import SLOT  # noqa: E402
 
 DATABRICKS = ("DATABRICKS_CONFIG_PROFILE", "UC_CATALOG", "WAREHOUSE_ID", "DATABRICKS_CLIENT_ID")
@@ -51,19 +51,6 @@ BRONZE = {
 # a snapshot (r) holds one row per key: a key seen twice means rows sent twice (a snapshot taken again after a
 # failure, or a batch resent after a lost ack)
 KEYS = {"services": "service", "incidents": "incident_id", "alerts_history": "alert_id"}
-
-
-def statements(path: Path) -> list[str]:
-    """The statements of a .sql file: comment lines out, each statement ends with a line that ends in ';'."""
-    found, current = [], []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.lstrip().startswith("--") or not line.strip():
-            continue
-        current.append(line)
-        if line.rstrip().endswith(";"):
-            found.append("\n".join(current).rstrip().rstrip(";"))
-            current = []
-    return found
 
 
 def _databricks(env: dict[str, str]):

@@ -30,7 +30,8 @@ NEVER_READ = {"DATABRICKS_CLIENT_SECRET"}
 # what must never reach the screen: URLs, workspace host, e-mails and IDs
 _SENSITIVE = [
     (re.compile(r"https?://\S+"), "<url>"),
-    (re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), "<e-mail>"),
+    # the last label of an e-mail domain has letters: a Go module version such as service@v0.165.0 is not an e-mail
+    (re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}\b"), "<e-mail>"),
     (re.compile(r"\b[\w.-]+\.(?:azuredatabricks\.net|cloud\.databricks\.com|gcp\.databricks\.com)\b"), "<host>"),
     (re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I), "<id>"),
     (re.compile(r"\b[0-9a-f]{16,}\b", re.I), "<id>"),
@@ -189,6 +190,19 @@ def sql(w, warehouse_id: str, statement: str, wait_s: int = 300, catalog: str | 
         error = r.status.error.message if r.status.error else r.status.state.value
         raise SqlFailed(scrub(first_line(error)))
     return (r.result.data_array or []) if r.result else []
+
+
+def statements(path: Path) -> list[str]:
+    """The statements of a .sql file: comment lines out, each statement ends with a line that ends in ';'."""
+    found, current = [], []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.lstrip().startswith("--") or not line.strip():
+            continue
+        current.append(line)
+        if line.rstrip().endswith(";"):
+            found.append("\n".join(current).rstrip().rstrip(";"))
+            current = []
+    return found
 
 
 # ---- local Postgres --------------------------------------------------------------------------------------

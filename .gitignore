@@ -26,6 +26,9 @@ ingest/debezium/dist/
 ingest/debezium/build/
 ingest/debezium/data/
 
+# OTel Collector logs (Phase 2): they hold the workspace host
+ingest/otel/data/
+
 # editor settings
 .vscode/
 

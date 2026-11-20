@@ -13,6 +13,8 @@ Usage, from the project root with the conda env active (conda activate zerobus-n
   python sim/run.py                 seed 42, speed 12: one scenario minute every 5 s, about 2 min in total
   python sim/run.py --speed 1       real time, 20 min
   python sim/run.py --seed 7        another seed: other traffic, same script
+  python sim/run.py --otlp          Phase 2: the telemetry also goes over OTLP to the OTel Collector on 127.0.0.1:4317
+                                    (bash ingest/otel/run.sh), which sends it to Zerobus
 
 Writes to the local Postgres (cmdb.services and cmdb.incidents) and the telemetry to .local/phase1/run-<time>/.
 At the end it prints the digest of the run's events; two runs with the same seed must print the same digest, at any
@@ -25,6 +27,7 @@ import argparse
 import hashlib
 import json
 import random
+import socket
 import sys
 import time
 from datetime import datetime, timezone
@@ -129,7 +132,16 @@ def compare(digest: str, seed: int, speed: float, folder: Path, events: int) -> 
              f"digest {same_seed[-1]['digest'][:12]})")
 
 
-def run(env: dict[str, str], speed: float, seed: int) -> int:
+def collector_listens(endpoint: str) -> bool:
+    host, _, port = endpoint.rpartition(":")
+    try:
+        socket.create_connection((host or "127.0.0.1", int(port)), timeout=1).close()
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def run(env: dict[str, str], speed: float, seed: int, otlp: str | None = None) -> int:
     section(f"Scenario (seed {seed}, speed {speed:g}: one scenario minute every {60 / speed:.1f} s)")
     if keys := missing(env, POSTGRES):
         fail("missing in .env: " + ", ".join(keys))
@@ -152,16 +164,23 @@ def run(env: dict[str, str], speed: float, seed: int) -> int:
             fail(f"catalog not in the initial state ({', '.join(off)}): python setup/01_source.py reset")
             return summary()
         ok("catalog in the initial state: " + ", ".join(f"{service} {version}" for service, version in current.items()))
+        if otlp and not collector_listens(otlp):
+            fail(f"nothing listens on {otlp}: start the OTel Collector first (bash ingest/otel/run.sh)")
+            return summary()
         folder, suffix = RUNS / f"run-{datetime.now():%Y%m%d-%H%M%S}", 1
         while folder.exists():
             suffix += 1
             folder = folder.with_name(f"{folder.name.split('.')[0]}.{suffix}")
         folder.mkdir(parents=True)
         info(f"telemetry in {folder.relative_to(ROOT)}/")
+        if otlp:
+            # tells python setup/02_otel.py check that this run went over OTLP too
+            (folder / "otlp.json").write_text(json.dumps({"endpoint": otlp}) + "\n", encoding="utf-8")
+            ok(f"OTel Collector listening on {otlp}: the telemetry goes over OTLP too")
 
         section("Timeline")
         rng = random.Random(seed)
-        shop = Shop(folder, metric_interval_s=60 / speed)
+        shop = Shop(folder, metric_interval_s=60 / speed, otlp=otlp)
         t0 = time.time()
         scenario = Scenario(shop, deploys, incidents, t0, speed)
         schedule: dict[int, list] = {}
@@ -197,6 +216,8 @@ def run(env: dict[str, str], speed: float, seed: int) -> int:
     (folder / "events.jsonl").write_text(canonical, encoding="utf-8")
     compare(hashlib.sha256(canonical.encode("utf-8")).hexdigest(), seed, speed, folder, len(scenario.events))
     ok(f"telemetry: {shop.counts['spans']:,} spans, {shop.counts['logs']:,} logs, {metric_exports} metric exports")
+    if otlp:
+        info(f"also sent over OTLP to {otlp}; python setup/02_otel.py check shows what reached the otel tables")
     back = all(final[service] == SERVICES[service]["version"] for service in SERVICES)
     (ok if back else warn)("catalog at the end: "
                            + ", ".join(f"{service} {version}" for service, version in final.items()))
@@ -210,10 +231,12 @@ def main() -> int:
     parser.add_argument("--speed", type=float, default=DEFAULT_SPEED,
                         help=f"scenario seconds per real second (default {DEFAULT_SPEED:g}; 1 is real time)")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help=f"traffic seed (default {DEFAULT_SEED})")
+    parser.add_argument("--otlp", nargs="?", const="127.0.0.1:4317", metavar="HOST:PORT",
+                        help="also send the telemetry over OTLP gRPC to the OTel Collector (default 127.0.0.1:4317)")
     args = parser.parse_args()
     if not 0 < args.speed <= 600:
         parser.error("--speed must be between 0 and 600")
-    return run(read_env(), args.speed, args.seed)
+    return run(read_env(), args.speed, args.seed, args.otlp)
 
 
 if __name__ == "__main__":
