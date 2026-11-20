@@ -18,6 +18,8 @@ Part 2 of [zerobus-postgres-cdc](https://github.com/ThomazRossito/zerobus-postgr
 
 Status: Phase 0 done (2026-11-20): environment check, Unity Catalog setup and the AUTO CDC bitemporal test.
 Phase 1 done (2026-11-20): CDC source and shop simulator; two runs with seed 42 produce the same events.
+Phase 2 done (2026-11-20): CDC and OpenTelemetry through Zerobus Ingest; commit → bronze latency p50 5.4 s, p95 8.2 s;
+the test plan of [debezium/dbz#3026](https://github.com/debezium/dbz/issues/3026) on Debezium Server 3.8.0.Alpha2.
 
 ## Phase 0
 
@@ -47,19 +49,37 @@ scenario minute every 5 s by default) and prints a digest of its events; Phase 1
 same events as the first. `python setup/01_source.py alerts` loads 10 million rows into `cmdb.alerts_history` for the
 Debezium test of Phase 2.
 
-## Phase 2 (in progress): CDC through Zerobus
+## Phase 2: CDC and OpenTelemetry through Zerobus
+
+CDC: bronze tables, then the 10 million row initial load in parallel and the CDC from a new slot.
 
 ```bash
-python setup/02_cdc.py create        # bronze tables and Zerobus grants
-python setup/02_cdc.py check
-conda activate zerobus-nrt-oncall    # in a second terminal
+python setup/02_cdc.py create            # bronze tables and Zerobus grants
+python setup/02_cdc.py reset --yes       # no slot, no offsets, empty bronze before a new load
+conda activate zerobus-nrt-oncall        # in a second terminal
 set -a; source .env; set +a
-bash ingest/debezium/run.sh          # Debezium Server 3.8.0.Alpha2, built from the tag
+python ingest/debezium/run_parallel.py   # 8 Debezium Server instances, one alert_id range each
+python setup/02_cdc.py check             # one snapshot row per alert_id
+DBZ_SNAPSHOT_MODE=no_data bash ingest/debezium/run.sh   # the CDC, without a new snapshot
+python measure/latency.py                # commit → bronze latency, part 1's ruler
 ```
 
-`ingest/debezium/application.properties` reads every value from the environment, the OAuth secret included. A
-`RegexRouter` sends `<catalog>.cmdb.<table>` to `<catalog>.bronze.<table>`; `timestamptz` columns land as STRING
-and silver converts them. `python setup/02_cdc.py reset --yes` prepares a new initial load.
+OpenTelemetry: the three OTel tables, the Collector and one run of the sim over OTLP.
 
-The terminal shows Debezium's console through `ingest/mask.py`, with URLs, hosts, IDs, e-mails and the Postgres
-user masked, so it can be pasted in an issue or a chat; the full log stays in `ingest/debezium/data/logs/`.
+```bash
+python setup/02_otel.py create           # otel.shop_otel_spans, _logs, _metrics and their grants
+conda activate zerobus-nrt-oncall        # in a third terminal
+set -a; source .env; set +a
+bash ingest/otel/run.sh                  # otelcol-contrib, OTLP on 127.0.0.1:4317 to Zerobus
+python sim/run.py --otlp                 # the scenario, with its telemetry over OTLP
+python setup/02_otel.py check            # the run's spans and logs, all in the tables
+```
+
+`ingest/debezium/application.properties` and `ingest/otel/collector.yaml` read every value from the environment,
+the OAuth secret included; no Python script reads it. A `RegexRouter` sends `<catalog>.cmdb.<table>` to
+`<catalog>.bronze.<table>`; `timestamptz` columns land as STRING and silver converts them. The Collector follows the
+example of the Databricks docs: one `oauth2client` per table, which renews the token before it expires.
+
+The terminals show Debezium's and the Collector's consoles through `ingest/mask.py`, with URLs, hosts, IDs, e-mails
+and the Postgres user masked, so they can be pasted in an issue or a chat; the full logs stay in
+`ingest/debezium/data/logs/` and `ingest/otel/data/logs/`, outside git.
