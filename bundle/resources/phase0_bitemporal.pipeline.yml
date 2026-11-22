@@ -7,7 +7,8 @@
 #
 # -----------------------------------------------------------------------------
 # Phase 0 · minimal AUTO CDC bitemporal test: confirms the feature (Beta) runs in this workspace.
-# Reads bronze.phase0_bitemporal_source and writes silver.phase0_bitemporal. Leaves the bundle in Phase 3.
+# Reads bronze.phase0_bitemporal_source and writes silver.phase0_bitemporal. Still in the bundle after Phase 3:
+# taking it out deletes the pipeline and its table on the next deploy, so that waits for a decision.
 
 resources:
   pipelines:

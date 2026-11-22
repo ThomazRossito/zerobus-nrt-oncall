@@ -20,6 +20,8 @@ Status: Phase 0 done (2026-11-20): environment check, Unity Catalog setup and th
 Phase 1 done (2026-11-20): CDC source and shop simulator; two runs with seed 42 produce the same events.
 Phase 2 done (2026-11-20): CDC and OpenTelemetry through Zerobus Ingest; commit → bronze latency p50 5.4 s, p95 8.2 s;
 the test plan of [debezium/dbz#3026](https://github.com/debezium/dbz/issues/3026) on Debezium Server 3.8.0.Alpha2.
+Phase 3 done (2026-11-22): the Lakeflow pipeline in the bundle, SQL on serverless; at 14:05 the as-of queries answer
+2.4.1 for the version that was live and 2.4.0 for what the catalog said, and the deleted incident leaves SCD1.
 
 ## Phase 0
 
@@ -83,3 +85,21 @@ example of the Databricks docs: one `oauth2client` per table, which renews the t
 The terminals show Debezium's and the Collector's consoles through `ingest/mask.py`, with URLs, hosts, IDs, e-mails
 and the Postgres user masked, so they can be pasted in an issue or a chat; the full logs stay in
 `ingest/debezium/data/logs/` and `ingest/otel/data/logs/`, outside git.
+
+## Phase 3: the pipeline
+
+The Lakeflow pipeline in the bundle, in SQL on serverless (`bundle/resources/oncall.pipeline.yml` and
+`bundle/src/pipeline/`): every change in silver (`services_changes`, `incidents_changes`), AUTO CDC SCD1
+(`incidents_current`), SCD2 (`services_history`) and bitemporal (`services_bitemporal`), and gold (`service_health`,
+`errors_by_version`, `incident_postmortem`, `hop_latency`). It reads what Phase 2 left in bronze and in the OTel tables;
+Debezium and the Collector do not need to be running.
+
+```bash
+python setup/03_pipeline.py check        # read-only: the inputs, and the results once the pipeline ran
+python setup/03_pipeline.py run          # deploys the bundle, runs one update and checks the results
+```
+
+Phase 3 closes when the as-of queries answer 2.4.1 for the version that was live when the incident opened and 2.4.0
+for what the catalog said at that moment, and the deleted incident is not in `silver.incidents_current`.
+`sql/phase3/bitemporal_in_action.sql` shows it in the SQL editor: the two answers from the same table, where only the
+system-time filter changes.
