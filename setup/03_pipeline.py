@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.bundle import deploy, pipeline_id, run_update  # noqa: E402
+from lib.bundle import bundle_variables, deploy, pipeline_id, run_update  # noqa: E402
 from lib.common import (COUNTS, ROOT, SqlFailed, client, fail, first_line, guard, info, missing, ok,  # noqa: E402
                         read_env, scrub, section, sql, summary, warn)
 from sim.scenario import BAD_RELEASE, DEFAULT_SPEED, DURATION_S, SERVICES, TIMELINE, clock  # noqa: E402
@@ -442,7 +442,7 @@ def run_pipeline(env: dict[str, str], full_refresh: bool) -> int:
         info("nothing was deployed: the inputs above have to pass first")
         return summary()
     section("Bundle")
-    variables = {"catalog": env["UC_CATALOG"]}
+    variables = bundle_variables(env)
     info("bundle deploy: about a minute")
     if not deploy(env, variables):
         return summary()

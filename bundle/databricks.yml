@@ -8,8 +8,9 @@
 # -----------------------------------------------------------------------------
 # zerobus-nrt-oncall · what the project creates in Databricks (Declarative Automation Bundle)
 #
-# Run it through the setup scripts, which read the CLI profile and the catalog from .env:
+# Run it through the setup scripts, which read the CLI profile, the catalog and the warehouse from .env:
 #   python setup/03_pipeline.py run               # phase 3: the on-call pipeline, then one update
+#   python setup/04_genie.py run                  # phase 4: the Genie Agent, then one question
 # No workspace.host here: the workspace is the one of the CLI profile.
 # Catalog and schemas stay out of the bundle on purpose: a "bundle destroy" never drops data.
 
@@ -25,6 +26,8 @@ variables:
   channel:
     description: Pipeline channel, CURRENT or PREVIEW.
     default: CURRENT
+  warehouse_id:
+    description: SQL warehouse of the Genie Agent (WAREHOUSE_ID in .env); Genie needs a pro or serverless one.
 
 targets:
   dev:

@@ -1,0 +1,550 @@
+# ------------------------------------------------------------------------------
+# Author:       Thomaz Antonio Rossito Neto
+#               Principal Data Architect & AI Strategy
+#               Databricks Solutions Architect Champion
+# Linkedin:     in/thomaz-antonio-rossito-neto/
+# Created:      2026-11-24
+#
+# -----------------------------------------------------------------------------
+# Phase 4 · the Genie Agent of the on-call scenario: five Phase 3 tables with column descriptions, five sample
+# questions with example SQL, and one block of instructions. genie_spaces needs the direct deployment engine, the
+# default (Databricks CLI 1.3.0+). serialized_space is version 2 of the Genie Agents API, written inline so that
+# ${var.catalog} reaches the table names. The API rejects unsorted lists and ids that are not 32 lowercase hex
+# characters: tables are sorted by identifier, column_configs by column_name, the rest by id.
+
+resources:
+  genie_spaces:
+    oncall_genie:
+      title: "On-call postmortem · zerobus-nrt-oncall"
+      description: >-
+        On-call and postmortem questions about the fictional shop of the zerobus-nrt-oncall experiment
+        (checkout, payment, inventory): which version of a service was live versus what the service catalog
+        said at that moment (bitemporal), incidents and how long they took, error rate and latency per service
+        and version from OpenTelemetry spans, and how long database changes took to reach Debezium.
+      warehouse_id: ${var.warehouse_id}
+      serialized_space: |
+        {
+          "version": 2,
+          "config": {
+            "sample_questions": [
+              {
+                "id": "5ace0a61dad30f39d0d61fde2da9add8",
+                "question": [
+                  "How long did the latest checkout incident take to be mitigated and resolved?"
+                ]
+              },
+              {
+                "id": "5cb760b74954aece3f5d4f12796cb3ab",
+                "question": [
+                  "What was the checkout error rate by version during the latest incident?"
+                ]
+              },
+              {
+                "id": "9904504297762033990f6229ec2102e8",
+                "question": [
+                  "Which checkout version was live when the latest 'Checkout error rate above 5%' incident opened, and which version did the service catalog name at that moment?"
+                ]
+              },
+              {
+                "id": "a67da302585c298f5ae2ae036aeb05b5",
+                "question": [
+                  "When was the service catalog wrong about the checkout version?"
+                ]
+              },
+              {
+                "id": "d736454f248430ef01fe09334d9d4d59",
+                "question": [
+                  "What are the p50 and p95 latencies from the Postgres commit to Debezium?"
+                ]
+              }
+            ]
+          },
+          "data_sources": {
+            "tables": [
+              {
+                "identifier": "${var.catalog}.gold.errors_by_version",
+                "description": [
+                  "Each 5-second bucket of server spans per service, next to the service catalog: the version the spans carry (telemetry_version), requests, errors and error rate, the version the catalog says today was live (catalog_live_version) and the version the catalog named at that moment (catalog_known_version). catalog_was_right is false where the catalog was wrong at the time."
+                ],
+                "column_configs": [
+                  {
+                    "column_name": "as_of",
+                    "description": [
+                      "Moment the catalog was looked up: the middle of the bucket's spans of that version (UTC)."
+                    ]
+                  },
+                  {
+                    "column_name": "bucket_start",
+                    "description": [
+                      "Start of the 5-second bucket (UTC)."
+                    ]
+                  },
+                  {
+                    "column_name": "catalog_known_version",
+                    "description": [
+                      "Version the service catalog named at as_of, with what it knew then."
+                    ],
+                    "synonyms": [
+                      "what the catalog said",
+                      "version known at the time"
+                    ]
+                  },
+                  {
+                    "column_name": "catalog_live_version",
+                    "description": [
+                      "Version that was live at as_of, as the catalog knows today."
+                    ],
+                    "synonyms": [
+                      "version live",
+                      "version in production"
+                    ]
+                  },
+                  {
+                    "column_name": "catalog_was_right",
+                    "description": [
+                      "True when the version in the spans is the one the catalog named at that moment."
+                    ]
+                  },
+                  {
+                    "column_name": "service",
+                    "enable_format_assistance": true,
+                    "enable_entity_matching": true
+                  },
+                  {
+                    "column_name": "telemetry_version",
+                    "description": [
+                      "Version carried by the spans (service.version attribute)."
+                    ],
+                    "synonyms": [
+                      "version in the telemetry",
+                      "version in the spans"
+                    ],
+                    "enable_format_assistance": true,
+                    "enable_entity_matching": true
+                  }
+                ]
+              },
+              {
+                "identifier": "${var.catalog}.gold.hop_latency",
+                "description": [
+                  "Latency of each insert, update or delete on the CDC path, one row per change: capture_ms is the time from the commit in Postgres to Debezium processing the change."
+                ],
+                "column_configs": [
+                  {
+                    "column_name": "capture_ms",
+                    "description": [
+                      "Milliseconds from the commit in Postgres to Debezium processing the change."
+                    ],
+                    "synonyms": [
+                      "capture latency",
+                      "commit to Debezium latency",
+                      "CDC latency"
+                    ]
+                  },
+                  {
+                    "column_name": "committed_at",
+                    "description": [
+                      "Commit of the change in Postgres (UTC)."
+                    ]
+                  },
+                  {
+                    "column_name": "debezium_at",
+                    "description": [
+                      "When Debezium processed the change (UTC)."
+                    ]
+                  },
+                  {
+                    "column_name": "lsn",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "op",
+                    "description": [
+                      "Kind of change: c insert, u update, d delete."
+                    ]
+                  },
+                  {
+                    "column_name": "processed_at",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "record_key",
+                    "description": [
+                      "Key of the changed row: the service name or the incident id."
+                    ]
+                  },
+                  {
+                    "column_name": "source_table",
+                    "description": [
+                      "Postgres table of the change: services or incidents."
+                    ],
+                    "enable_format_assistance": true,
+                    "enable_entity_matching": true
+                  },
+                  {
+                    "column_name": "to_silver_ms",
+                    "exclude": true
+                  }
+                ]
+              },
+              {
+                "identifier": "${var.catalog}.gold.incident_postmortem",
+                "description": [
+                  "One row per incident, with the two postmortem answers: the version that was live when it opened (catalog_live_at_open, as the catalog knows today) and the version the service catalog named at that moment (catalog_known_at_open). Also what on-call suspected at open and now, the version in the telemetry, and when the incident was mitigated and resolved."
+                ],
+                "column_configs": [
+                  {
+                    "column_name": "catalog_known_at_open",
+                    "description": [
+                      "Version the service catalog named when the incident opened, before any late record: what was known then."
+                    ],
+                    "synonyms": [
+                      "what the catalog said",
+                      "catalog version at the time",
+                      "version known at the time",
+                      "what we believed"
+                    ]
+                  },
+                  {
+                    "column_name": "catalog_live_at_open",
+                    "description": [
+                      "Version of the service that was live when the incident opened, as the catalog knows today."
+                    ],
+                    "synonyms": [
+                      "version live",
+                      "live version",
+                      "version in production",
+                      "deployed version"
+                    ]
+                  },
+                  {
+                    "column_name": "mitigated_at",
+                    "description": [
+                      "First commit with status mitigated (UTC)."
+                    ]
+                  },
+                  {
+                    "column_name": "opened_at",
+                    "description": [
+                      "When the incident opened (UTC, real time of the run)."
+                    ]
+                  },
+                  {
+                    "column_name": "resolved_at",
+                    "description": [
+                      "First commit with status resolved (UTC)."
+                    ]
+                  },
+                  {
+                    "column_name": "seconds_to_mitigate",
+                    "description": [
+                      "Real seconds from opened_at to mitigated_at."
+                    ]
+                  },
+                  {
+                    "column_name": "seconds_to_resolve",
+                    "description": [
+                      "Real seconds from opened_at to resolved_at."
+                    ]
+                  },
+                  {
+                    "column_name": "service",
+                    "enable_format_assistance": true,
+                    "enable_entity_matching": true
+                  },
+                  {
+                    "column_name": "severity",
+                    "enable_format_assistance": true,
+                    "enable_entity_matching": true
+                  },
+                  {
+                    "column_name": "status",
+                    "enable_format_assistance": true,
+                    "enable_entity_matching": true
+                  },
+                  {
+                    "column_name": "suspected_at_open",
+                    "description": [
+                      "Version on-call suspected when the incident was created."
+                    ]
+                  },
+                  {
+                    "column_name": "suspected_now",
+                    "description": [
+                      "Version on-call suspects now."
+                    ]
+                  },
+                  {
+                    "column_name": "telemetry_version_at_open",
+                    "description": [
+                      "Version carried by most requests of the service in the 5-second bucket where the incident opened."
+                    ],
+                    "synonyms": [
+                      "version in the telemetry"
+                    ]
+                  },
+                  {
+                    "column_name": "title",
+                    "enable_format_assistance": true,
+                    "enable_entity_matching": true
+                  }
+                ]
+              },
+              {
+                "identifier": "${var.catalog}.gold.service_health",
+                "description": [
+                  "Requests, errors, error rate and latency (p50 and p95, in ms) per 5-second bucket, service and the version the spans carry, from the OpenTelemetry server spans."
+                ],
+                "column_configs": [
+                  {
+                    "column_name": "bucket_end",
+                    "description": [
+                      "End of the 5-second bucket (UTC)."
+                    ]
+                  },
+                  {
+                    "column_name": "bucket_start",
+                    "description": [
+                      "Start of the 5-second bucket (UTC)."
+                    ]
+                  },
+                  {
+                    "column_name": "error_rate",
+                    "description": [
+                      "Errors divided by requests, from 0 to 1."
+                    ]
+                  },
+                  {
+                    "column_name": "first_span_at",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "last_span_at",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "p50_ms",
+                    "description": [
+                      "Median duration of the server spans, in milliseconds."
+                    ]
+                  },
+                  {
+                    "column_name": "p95_ms",
+                    "description": [
+                      "95th percentile of the duration of the server spans, in milliseconds."
+                    ]
+                  },
+                  {
+                    "column_name": "service",
+                    "enable_format_assistance": true,
+                    "enable_entity_matching": true
+                  },
+                  {
+                    "column_name": "version",
+                    "description": [
+                      "Version carried by the spans (service.version attribute)."
+                    ],
+                    "enable_format_assistance": true,
+                    "enable_entity_matching": true
+                  }
+                ]
+              },
+              {
+                "identifier": "${var.catalog}.silver.services_bitemporal",
+                "description": [
+                  "Version history of each service on two timelines (AUTO CDC bitemporal). Business time (__START_AT, __END_AT): when the version was live. System time (__SYSTEM_START_AT, __SYSTEM_END_AT): since when the service catalog said so. Rows with __SYSTEM_END_AT NULL are what the catalog says today; an open period has a NULL end."
+                ],
+                "column_configs": [
+                  {
+                    "column_name": "__END_AT",
+                    "description": [
+                      "End of the period the version was live (business time, UTC); NULL while it is still live."
+                    ]
+                  },
+                  {
+                    "column_name": "__START_AT",
+                    "description": [
+                      "Start of the period the version was live (business time, from deployed_at, UTC)."
+                    ]
+                  },
+                  {
+                    "column_name": "__SYSTEM_END_AT",
+                    "description": [
+                      "When the catalog stopped saying this (system time, UTC); NULL for what the catalog says today."
+                    ]
+                  },
+                  {
+                    "column_name": "__SYSTEM_START_AT",
+                    "description": [
+                      "Since when the catalog said this (system time, from the Postgres commit, UTC)."
+                    ]
+                  },
+                  {
+                    "column_name": "owner",
+                    "description": [
+                      "Team that owns the service."
+                    ]
+                  },
+                  {
+                    "column_name": "service",
+                    "enable_format_assistance": true,
+                    "enable_entity_matching": true
+                  },
+                  {
+                    "column_name": "version",
+                    "enable_format_assistance": true,
+                    "enable_entity_matching": true
+                  }
+                ]
+              }
+            ]
+          },
+          "instructions": {
+            "text_instructions": [
+              {
+                "id": "6f58d74b0aec2473a49d8895cefdee6b",
+                "content": [
+                  "## PURPOSE\n",
+                  "- Answer on-call and postmortem questions about the fictional shop of the zerobus-nrt-oncall experiment: services checkout, payment and inventory.\n",
+                  "- Users are on-call engineers and readers of the postmortem.\n",
+                  "\n",
+                  "## DISAMBIGUATION\n",
+                  "- \"Was live\", \"in production\" or \"deployed\" at a moment is business time with today's knowledge: catalog_live_at_open in gold.incident_postmortem, or the current rows of silver.services_bitemporal (__SYSTEM_END_AT is NULL).\n",
+                  "- \"What the catalog said\", \"what was known\" or \"what we believed\" at a moment is system time as of that moment: catalog_known_at_open, or the silver.services_bitemporal row whose system period contains that moment.\n",
+                  "- When a question names an incident by title and several incidents share it, use the latest one by opened_at and say so.\n",
+                  "\n",
+                  "## DATA QUALITY NOTES\n",
+                  "- All timestamps are UTC, the real time of the run. The scenario clock of the story (14:00 to 14:20, the incident at 14:05) is not stored.\n",
+                  "- Durations are real seconds. The simulator compresses time (speed 12 by default: one real second is 12 seconds of the scenario).\n",
+                  "- Incidents that only came in the initial snapshot have no change history: suspected_at_open and the status times are NULL.\n",
+                  "\n",
+                  "## Instructions you must follow when providing summaries\n",
+                  "- For a postmortem question, state both versions: the one that was live and the one the catalog named at the time.\n",
+                  "- Give times in UTC."
+                ]
+              }
+            ],
+            "example_question_sqls": [
+              {
+                "id": "0d454f3313ca501a2f8cb1cae9c225cf",
+                "question": [
+                  "What was the checkout error rate by version during the latest incident?"
+                ],
+                "sql": [
+                  "WITH incident AS (\n",
+                  "  SELECT incident_postmortem.opened_at, incident_postmortem.resolved_at\n",
+                  "  FROM ${var.catalog}.gold.incident_postmortem\n",
+                  "  WHERE incident_postmortem.service = 'checkout'\n",
+                  "  ORDER BY incident_postmortem.opened_at DESC\n",
+                  "  LIMIT 1\n",
+                  ")\n",
+                  "SELECT\n",
+                  "  service_health.version,\n",
+                  "  sum(service_health.requests) AS requests,\n",
+                  "  sum(service_health.errors) AS errors,\n",
+                  "  round(sum(service_health.errors) / sum(service_health.requests), 4) AS error_rate\n",
+                  "FROM ${var.catalog}.gold.service_health\n",
+                  "JOIN incident\n",
+                  "  ON service_health.bucket_start >= incident.opened_at\n",
+                  " AND service_health.bucket_start < coalesce(incident.resolved_at, current_timestamp())\n",
+                  "WHERE service_health.service = 'checkout'\n",
+                  "GROUP BY service_health.version\n",
+                  "ORDER BY service_health.version"
+                ],
+                "usage_guidance": [
+                  "Requests, errors and error rate per version of a service between the opening and the resolution of an incident."
+                ]
+              },
+              {
+                "id": "5248ecfc7a94d60cb26ec0f806d1130b",
+                "question": [
+                  "How long did the latest checkout incident take to be mitigated and resolved?"
+                ],
+                "sql": [
+                  "SELECT\n",
+                  "  incident_postmortem.incident_id,\n",
+                  "  incident_postmortem.title,\n",
+                  "  incident_postmortem.opened_at,\n",
+                  "  incident_postmortem.mitigated_at,\n",
+                  "  incident_postmortem.resolved_at,\n",
+                  "  incident_postmortem.seconds_to_mitigate,\n",
+                  "  incident_postmortem.seconds_to_resolve\n",
+                  "FROM ${var.catalog}.gold.incident_postmortem\n",
+                  "WHERE incident_postmortem.service = 'checkout'\n",
+                  "  AND incident_postmortem.resolved_at IS NOT NULL\n",
+                  "ORDER BY incident_postmortem.opened_at DESC\n",
+                  "LIMIT 1"
+                ],
+                "usage_guidance": [
+                  "Time from opening to mitigation and to resolution of an incident, in real seconds."
+                ]
+              },
+              {
+                "id": "57fbbecf800212b46923791de4ea8534",
+                "question": [
+                  "When was the service catalog wrong about the checkout version?"
+                ],
+                "sql": [
+                  "SELECT\n",
+                  "  errors_by_version.bucket_start,\n",
+                  "  errors_by_version.telemetry_version,\n",
+                  "  errors_by_version.catalog_known_version,\n",
+                  "  errors_by_version.catalog_live_version,\n",
+                  "  errors_by_version.requests,\n",
+                  "  errors_by_version.error_rate\n",
+                  "FROM ${var.catalog}.gold.errors_by_version\n",
+                  "WHERE errors_by_version.service = 'checkout'\n",
+                  "  AND NOT errors_by_version.catalog_was_right\n",
+                  "ORDER BY errors_by_version.bucket_start"
+                ],
+                "usage_guidance": [
+                  "Buckets where the version in the telemetry differs from the version the catalog named at that moment."
+                ]
+              },
+              {
+                "id": "5a5e350e64db186a095f1918c128d484",
+                "question": [
+                  "What are the p50 and p95 latencies from the Postgres commit to Debezium?"
+                ],
+                "sql": [
+                  "SELECT\n",
+                  "  hop_latency.source_table,\n",
+                  "  count(*) AS changes,\n",
+                  "  percentile_approx(hop_latency.capture_ms, 0.5) AS p50_capture_ms,\n",
+                  "  percentile_approx(hop_latency.capture_ms, 0.95) AS p95_capture_ms,\n",
+                  "  max(hop_latency.capture_ms) AS max_capture_ms\n",
+                  "FROM ${var.catalog}.gold.hop_latency\n",
+                  "GROUP BY hop_latency.source_table\n",
+                  "ORDER BY hop_latency.source_table"
+                ],
+                "usage_guidance": [
+                  "Capture latency of the CDC path per Postgres table, from the commit to Debezium."
+                ]
+              },
+              {
+                "id": "d85c0203602f5f0800ae205e06b8400c",
+                "question": [
+                  "Which checkout version was live when the latest 'Checkout error rate above 5%' incident opened, and which version did the service catalog name at that moment?"
+                ],
+                "sql": [
+                  "SELECT\n",
+                  "  incident_postmortem.incident_id,\n",
+                  "  incident_postmortem.title,\n",
+                  "  incident_postmortem.opened_at,\n",
+                  "  incident_postmortem.catalog_live_at_open,\n",
+                  "  incident_postmortem.catalog_known_at_open,\n",
+                  "  incident_postmortem.suspected_at_open,\n",
+                  "  incident_postmortem.telemetry_version_at_open\n",
+                  "FROM ${var.catalog}.gold.incident_postmortem\n",
+                  "WHERE incident_postmortem.service = 'checkout'\n",
+                  "  AND incident_postmortem.title = 'Checkout error rate above 5%'\n",
+                  "ORDER BY incident_postmortem.opened_at DESC\n",
+                  "LIMIT 1"
+                ],
+                "usage_guidance": [
+                  "Which version was live when an incident opened, and which version the service catalog named at that moment: the two postmortem answers."
+                ]
+              }
+            ]
+          }
+        }

@@ -7,7 +7,8 @@
 #
 # -----------------------------------------------------------------------------
 """Declarative Automation Bundle and Lakeflow pipeline helpers for the setup scripts from Phase 3 on: deploy the
-bundle, find a pipeline it deployed, run an update and read why it failed, with output safe to paste in a chat."""
+bundle, find a resource it deployed (a pipeline, the Genie Agent), run an update and read why it failed, with
+output safe to paste in a chat."""
 from __future__ import annotations
 
 import json
@@ -41,15 +42,36 @@ def deploy(env: dict[str, str], variables: dict[str, str]) -> bool:
     return True
 
 
-def pipeline_id(env: dict[str, str], variables: dict[str, str], key: str) -> str | None:
-    """The ID of a pipeline the bundle deployed, from bundle summary. It is used, never printed."""
+def bundle_variables(env: dict[str, str]) -> dict[str, str]:
+    """The bundle's variables, from .env: the catalog, and the SQL warehouse of the Genie Agent (Phase 4)."""
+    return {"catalog": env["UC_CATALOG"], "warehouse_id": env["WAREHOUSE_ID"]}
+
+
+def resource_id(env: dict[str, str], variables: dict[str, str], kind: str, key: str,
+                quiet: bool = False) -> str | None:
+    """The ID of a resource the bundle deployed (kind as in the bundle: pipelines, genie_spaces), from bundle summary.
+
+    None when the resource is not deployed yet; quiet skips the FAIL line for that case, not for a CLI error.
+    The ID is used, never printed.
+    """
     rc, out, err = run(["databricks", "bundle", "summary", "-o", "json", *_variables(variables), "-p",
                         env["DATABRICKS_CONFIG_PROFILE"]], cwd=BUNDLE)
-    try:
-        return json.loads(out)["resources"]["pipelines"][key]["id"]
-    except (ValueError, KeyError, TypeError):
-        fail(f"pipeline {key} not found in the bundle summary: {scrub(error_line(err or out))}")
+    if rc != 0:
+        fail(f"bundle summary: {scrub(error_line(err or out))}")
         return None
+    try:
+        resource = json.loads(out)["resources"][kind][key]
+        found = resource.get("id") or resource.get("space_id")
+    except (ValueError, KeyError, TypeError, AttributeError):
+        found = None
+    if found is None and not quiet:
+        fail(f"{kind} {key} not found in the bundle summary: deploy the bundle first")
+    return found
+
+
+def pipeline_id(env: dict[str, str], variables: dict[str, str], key: str) -> str | None:
+    """The ID of a pipeline the bundle deployed, from bundle summary. It is used, never printed."""
+    return resource_id(env, variables, "pipelines", key)
 
 
 def pipeline_error(w, pipeline_id: str) -> str:

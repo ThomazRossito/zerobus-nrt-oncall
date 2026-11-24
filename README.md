@@ -22,6 +22,9 @@ Phase 2 done (2026-11-20): CDC and OpenTelemetry through Zerobus Ingest; commit 
 the test plan of [debezium/dbz#3026](https://github.com/debezium/dbz/issues/3026) on Debezium Server 3.8.0.Alpha2.
 Phase 3 done (2026-11-22): the Lakeflow pipeline in the bundle, SQL on serverless; at 14:05 the as-of queries answer
 2.4.1 for the version that was live and 2.4.0 for what the catalog said, and the deleted incident leaves SCD1.
+Phase 4 done (2026-11-24): a Genie Agent in the bundle over the Phase 3 tables; Genie One sends the postmortem
+question to it and answers 2.4.1 for the version that was live and 2.4.0 for what the catalog said, in English and
+in Portuguese.
 
 ## Phase 0
 
@@ -108,3 +111,20 @@ Phase 3 closes when the as-of queries answer 2.4.1 for the version that was live
 for what the catalog said at that moment, and the deleted incident is not in `silver.incidents_current`.
 `sql/phase3/bitemporal_in_action.sql` shows it in the SQL editor: the two answers from the same table, where only the
 system-time filter changes.
+
+## Phase 4: Genie
+
+A Genie Agent in the bundle (`bundle/resources/oncall.genie.yml`, the `genie_spaces` resource, Databricks CLI 1.3.0 or
+later with the direct deployment engine): five Phase 3 tables (`gold.incident_postmortem`, `gold.errors_by_version`,
+`gold.service_health`, `gold.hop_latency`, `silver.services_bitemporal`) with column descriptions, five sample questions
+with example SQL and one block of instructions. Its warehouse is `WAREHOUSE_ID` of `.env`, a pro or serverless one.
+
+```bash
+python setup/04_genie.py check           # read-only: tables, the expected answer, warehouse, CLI, the agent
+python setup/04_genie.py run             # deploys the bundle and asks the agent the postmortem question
+python setup/04_genie.py ask             # asks Genie One the same question (databricks genie ask)
+```
+
+Phase 4 closes when Genie One answers the postmortem question correctly: 2.4.1 was live when the latest
+"Checkout error rate above 5%" incident opened, and the catalog named 2.4.0 at that moment. The question names the
+incident instead of 14:05 because the tables keep the real time of the run, in UTC.
