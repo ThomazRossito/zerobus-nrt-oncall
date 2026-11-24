@@ -6,8 +6,8 @@
 # Created:      2026-11-24
 #
 # -----------------------------------------------------------------------------
-# Phase 4 · the Genie Agent of the on-call scenario: five Phase 3 tables with column descriptions, five sample
-# questions with example SQL, and one block of instructions. genie_spaces needs the direct deployment engine, the
+# Phase 4 · the Genie Agent of the on-call scenario: five Phase 3 tables and two OpenTelemetry tables with column
+# descriptions, eight sample questions with example SQL, and one block of instructions. genie_spaces needs the direct deployment engine, the
 # default (Databricks CLI 1.3.0+). serialized_space is version 2 of the Genie Agents API, written inline so that
 # ${var.catalog} reaches the table names. The API rejects unsorted lists and ids that are not 32 lowercase hex
 # characters: tables are sorted by identifier, column_configs by column_name, the rest by id.
@@ -19,14 +19,22 @@ resources:
       description: >-
         On-call and postmortem questions about the fictional shop of the zerobus-nrt-oncall experiment
         (checkout, payment, inventory): which version of a service was live versus what the service catalog
-        said at that moment (bitemporal), incidents and how long they took, error rate and latency per service
-        and version from OpenTelemetry spans, and how long database changes took to reach Debezium.
+        said at that moment (bitemporal history with live_from, live_until, known_from and known_until), in
+        UTC or on the scenario clock of the story, where the latest checkout incident opens at 14:05;
+        incidents and how long they took; error rate, latency, error messages and operations per service and
+        version from OpenTelemetry spans and logs; and how long database changes took to reach Debezium.
       warehouse_id: ${var.warehouse_id}
       serialized_space: |
         {
           "version": 2,
           "config": {
             "sample_questions": [
+              {
+                "id": "57006c6aa87f11803ae3faf6b1cc9acf",
+                "question": [
+                  "On the scenario clock, which checkout version was live at 14:05 and what did the catalog say at that moment, with live_from, live_until, known_from and known_until?"
+                ]
+              },
               {
                 "id": "5ace0a61dad30f39d0d61fde2da9add8",
                 "question": [
@@ -46,9 +54,21 @@ resources:
                 ]
               },
               {
+                "id": "9a1806e03d1cf16b4c3be3f600be141a",
+                "question": [
+                  "Which checkout operations failed during the latest incident, by version, and how slow were they?"
+                ]
+              },
+              {
                 "id": "a67da302585c298f5ae2ae036aeb05b5",
                 "question": [
                   "When was the service catalog wrong about the checkout version?"
+                ]
+              },
+              {
+                "id": "caaaf6ca9be70247fd555febd2853193",
+                "question": [
+                  "What error messages did checkout log, by version, during the latest incident?"
                 ]
               },
               {
@@ -350,6 +370,229 @@ resources:
                 ]
               },
               {
+                "identifier": "${var.catalog}.otel.shop_otel_logs",
+                "description": [
+                  "OpenTelemetry logs of the shop, one row per log record: service_name, severity_text (ERROR, INFO), the message in body (read it as body::string) and the version in resource.attributes (resource.attributes:['service.version']::string). trace_id and span_id link a log to its span."
+                ],
+                "column_configs": [
+                  {
+                    "column_name": "body",
+                    "description": [
+                      "The log message, a VARIANT: read it as body::string."
+                    ],
+                    "synonyms": [
+                      "message",
+                      "error message",
+                      "log message"
+                    ]
+                  },
+                  {
+                    "column_name": "date",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "dropped_attributes_count",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "event_name",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "flags",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "instrumentation_scope",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "log_schema_url",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "observed_time_unix_nano",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "record_id",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "resource",
+                    "description": [
+                      "Resource of the log; the version is resource.attributes:['service.version']::string."
+                    ],
+                    "synonyms": [
+                      "version"
+                    ]
+                  },
+                  {
+                    "column_name": "resource_schema_url",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "service_name",
+                    "description": [
+                      "Service that wrote the log: checkout, payment or inventory."
+                    ],
+                    "enable_format_assistance": true,
+                    "enable_entity_matching": true
+                  },
+                  {
+                    "column_name": "severity_number",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "severity_text",
+                    "description": [
+                      "Severity of the log: ERROR or INFO."
+                    ],
+                    "enable_format_assistance": true,
+                    "enable_entity_matching": true
+                  },
+                  {
+                    "column_name": "span_id",
+                    "description": [
+                      "Span of the request that wrote the log."
+                    ]
+                  },
+                  {
+                    "column_name": "time",
+                    "description": [
+                      "When the log was written (UTC)."
+                    ]
+                  },
+                  {
+                    "column_name": "time_unix_nano",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "trace_id",
+                    "description": [
+                      "Trace of the request that wrote the log."
+                    ]
+                  }
+                ]
+              },
+              {
+                "identifier": "${var.catalog}.otel.shop_otel_spans",
+                "description": [
+                  "OpenTelemetry spans of the shop, one row per operation: service_name, name (the operation), kind (SPAN_KIND_SERVER for requests), status.code (STATUS_CODE_ERROR for failures), the duration from start_time_unix_nano and end_time_unix_nano (nanoseconds) and the version in resource.attributes:['service.version']::string."
+                ],
+                "column_configs": [
+                  {
+                    "column_name": "date",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "dropped_attributes_count",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "dropped_events_count",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "dropped_links_count",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "end_time_unix_nano",
+                    "description": [
+                      "End of the operation, in nanoseconds since the epoch."
+                    ]
+                  },
+                  {
+                    "column_name": "events",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "flags",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "instrumentation_scope",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "kind",
+                    "description": [
+                      "Span kind: SPAN_KIND_SERVER for the requests a service received."
+                    ],
+                    "enable_format_assistance": true,
+                    "enable_entity_matching": true
+                  },
+                  {
+                    "column_name": "links",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "name",
+                    "description": [
+                      "Name of the operation."
+                    ],
+                    "synonyms": [
+                      "operation",
+                      "endpoint"
+                    ],
+                    "enable_format_assistance": true,
+                    "enable_entity_matching": true
+                  },
+                  {
+                    "column_name": "record_id",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "resource",
+                    "description": [
+                      "Resource of the span; the version is resource.attributes:['service.version']::string."
+                    ],
+                    "synonyms": [
+                      "version"
+                    ]
+                  },
+                  {
+                    "column_name": "resource_schema_url",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "service_name",
+                    "description": [
+                      "Service of the operation: checkout, payment or inventory."
+                    ],
+                    "enable_format_assistance": true,
+                    "enable_entity_matching": true
+                  },
+                  {
+                    "column_name": "span_schema_url",
+                    "exclude": true
+                  },
+                  {
+                    "column_name": "start_time_unix_nano",
+                    "description": [
+                      "Start of the operation, in nanoseconds since the epoch."
+                    ]
+                  },
+                  {
+                    "column_name": "status",
+                    "description": [
+                      "Status of the operation; status.code is STATUS_CODE_ERROR for a failure."
+                    ]
+                  },
+                  {
+                    "column_name": "time",
+                    "description": [
+                      "When the operation started (UTC)."
+                    ]
+                  },
+                  {
+                    "column_name": "trace_state",
+                    "exclude": true
+                  }
+                ]
+              },
+              {
                 "identifier": "${var.catalog}.silver.services_bitemporal",
                 "description": [
                   "Version history of each service on two timelines (AUTO CDC bitemporal). Business time (__START_AT, __END_AT): when the version was live. System time (__SYSTEM_START_AT, __SYSTEM_END_AT): since when the service catalog said so. Rows with __SYSTEM_END_AT NULL are what the catalog says today; an open period has a NULL end."
@@ -376,7 +619,7 @@ resources:
                   {
                     "column_name": "__SYSTEM_START_AT",
                     "description": [
-                      "Since when the catalog said this (system time, from the Postgres commit, UTC)."
+                      "When the catalog recorded this row (system time, from the Postgres commit, UTC). A later change to the same period, such as a rollback that sets its end, starts a new row, so the earliest __SYSTEM_START_AT of a version is when the catalog first named it."
                     ]
                   },
                   {
@@ -412,14 +655,16 @@ resources:
                   "- \"Was live\", \"in production\" or \"deployed\" at a moment is business time with today's knowledge: catalog_live_at_open in gold.incident_postmortem, or the current rows of silver.services_bitemporal (__SYSTEM_END_AT is NULL).\n",
                   "- \"What the catalog said\", \"what was known\" or \"what we believed\" at a moment is system time as of that moment: catalog_known_at_open, or the silver.services_bitemporal row whose system period contains that moment.\n",
                   "- When a question names an incident by title and several incidents share it, use the latest one by opened_at and say so.\n",
+                  "- In silver.services_bitemporal, __SYSTEM_START_AT (known_from) is when the catalog recorded that row, not when it first named the version: a later change, such as a rollback, opens a new row. The first time the catalog named a version is the earliest __SYSTEM_START_AT of that version (first_known in the scenario clock example).\n",
                   "\n",
                   "## DATA QUALITY NOTES\n",
-                  "- All timestamps are UTC, the real time of the run. The scenario clock of the story (14:00 to 14:20, the incident at 14:05) is not stored.\n",
+                  "- All timestamps are UTC, the real time of the run. The scenario clock of the story (14:00 to 14:20, the incident at 14:05) is not stored: convert to it only when asked, anchored at the latest checkout incident, as in the scenario clock example.\n",
                   "- Durations are real seconds. The simulator compresses time (speed 12 by default: one real second is 12 seconds of the scenario).\n",
                   "- Incidents that only came in the initial snapshot have no change history: suspected_at_open and the status times are NULL.\n",
                   "\n",
                   "## Instructions you must follow when providing summaries\n",
                   "- For a postmortem question, state both versions: the one that was live and the one the catalog named at the time.\n",
+                  "- On the scenario clock, say when the catalog first named the live version from first_known, not from known_from.\n",
                   "- Give times in UTC."
                 ]
               }
@@ -453,6 +698,37 @@ resources:
                 ],
                 "usage_guidance": [
                   "Requests, errors and error rate per version of a service between the opening and the resolution of an incident."
+                ]
+              },
+              {
+                "id": "1b4ad699095219523db5a75c999ae987",
+                "question": [
+                  "Which checkout operations failed during the latest incident, by version, and how slow were they?"
+                ],
+                "sql": [
+                  "WITH incident AS (\n",
+                  "  SELECT incident_postmortem.opened_at, incident_postmortem.resolved_at\n",
+                  "  FROM ${var.catalog}.gold.incident_postmortem\n",
+                  "  WHERE incident_postmortem.service = 'checkout'\n",
+                  "  ORDER BY incident_postmortem.opened_at DESC\n",
+                  "  LIMIT 1\n",
+                  ")\n",
+                  "SELECT\n",
+                  "  shop_otel_spans.name AS operation,\n",
+                  "  shop_otel_spans.resource.attributes:['service.version']::string AS version,\n",
+                  "  count(*) AS spans,\n",
+                  "  count_if(shop_otel_spans.status.code = 'STATUS_CODE_ERROR') AS errors,\n",
+                  "  round(percentile_approx((shop_otel_spans.end_time_unix_nano - shop_otel_spans.start_time_unix_nano) / 1000000, 0.95), 1) AS p95_ms\n",
+                  "FROM ${var.catalog}.otel.shop_otel_spans\n",
+                  "JOIN incident\n",
+                  "  ON shop_otel_spans.time >= incident.opened_at\n",
+                  " AND shop_otel_spans.time < coalesce(incident.resolved_at, current_timestamp())\n",
+                  "WHERE shop_otel_spans.service_name = 'checkout'\n",
+                  "GROUP BY ALL\n",
+                  "ORDER BY errors DESC, spans DESC"
+                ],
+                "usage_guidance": [
+                  "Operations of a service per version in the window of an incident: spans, errors and p95 duration."
                 ]
               },
               {
@@ -522,6 +798,36 @@ resources:
                 ]
               },
               {
+                "id": "660b12b16eae435116917d940cac67d3",
+                "question": [
+                  "What error messages did checkout log, by version, during the latest incident?"
+                ],
+                "sql": [
+                  "WITH incident AS (\n",
+                  "  SELECT incident_postmortem.opened_at, incident_postmortem.resolved_at\n",
+                  "  FROM ${var.catalog}.gold.incident_postmortem\n",
+                  "  WHERE incident_postmortem.service = 'checkout'\n",
+                  "  ORDER BY incident_postmortem.opened_at DESC\n",
+                  "  LIMIT 1\n",
+                  ")\n",
+                  "SELECT\n",
+                  "  shop_otel_logs.resource.attributes:['service.version']::string AS version,\n",
+                  "  shop_otel_logs.body::string AS message,\n",
+                  "  count(*) AS logs\n",
+                  "FROM ${var.catalog}.otel.shop_otel_logs\n",
+                  "JOIN incident\n",
+                  "  ON shop_otel_logs.time >= incident.opened_at\n",
+                  " AND shop_otel_logs.time < coalesce(incident.resolved_at, current_timestamp())\n",
+                  "WHERE shop_otel_logs.service_name = 'checkout'\n",
+                  "  AND shop_otel_logs.severity_text = 'ERROR'\n",
+                  "GROUP BY ALL\n",
+                  "ORDER BY logs DESC"
+                ],
+                "usage_guidance": [
+                  "Error log messages of a service per version in the window of an incident, from the OpenTelemetry logs."
+                ]
+              },
+              {
                 "id": "d85c0203602f5f0800ae205e06b8400c",
                 "question": [
                   "Which checkout version was live when the latest 'Checkout error rate above 5%' incident opened, and which version did the service catalog name at that moment?"
@@ -543,6 +849,75 @@ resources:
                 ],
                 "usage_guidance": [
                   "Which version was live when an incident opened, and which version the service catalog named at that moment: the two postmortem answers."
+                ]
+              },
+              {
+                "id": "fe6662845f10588a7c62522668a9ad35",
+                "question": [
+                  "On the scenario clock, which checkout version was live at 14:05 and what did the catalog say at that moment, with live_from, live_until, known_from and known_until?"
+                ],
+                "sql": [
+                  "WITH incident AS (\n",
+                  "  SELECT incident_postmortem.opened_at AS t\n",
+                  "  FROM ${var.catalog}.gold.incident_postmortem\n",
+                  "  WHERE incident_postmortem.service = 'checkout'\n",
+                  "    AND incident_postmortem.title = 'Checkout error rate above 5%'\n",
+                  "  ORDER BY incident_postmortem.opened_at DESC\n",
+                  "  LIMIT 1\n",
+                  "),\n",
+                  "answers AS (\n",
+                  "  SELECT 'was live at 14:05' AS question, services_bitemporal.version,\n",
+                  "    services_bitemporal.__START_AT AS live_start, services_bitemporal.__END_AT AS live_end,\n",
+                  "    services_bitemporal.__SYSTEM_START_AT AS known_start, services_bitemporal.__SYSTEM_END_AT AS known_end\n",
+                  "  FROM ${var.catalog}.silver.services_bitemporal CROSS JOIN incident\n",
+                  "  WHERE services_bitemporal.service = 'checkout'\n",
+                  "    AND services_bitemporal.__START_AT <= incident.t\n",
+                  "    AND (services_bitemporal.__END_AT > incident.t OR services_bitemporal.__END_AT IS NULL)\n",
+                  "    AND services_bitemporal.__SYSTEM_END_AT IS NULL\n",
+                  "  UNION ALL\n",
+                  "  SELECT 'catalog said at 14:05', services_bitemporal.version,\n",
+                  "    services_bitemporal.__START_AT, services_bitemporal.__END_AT,\n",
+                  "    services_bitemporal.__SYSTEM_START_AT, services_bitemporal.__SYSTEM_END_AT\n",
+                  "  FROM ${var.catalog}.silver.services_bitemporal CROSS JOIN incident\n",
+                  "  WHERE services_bitemporal.service = 'checkout'\n",
+                  "    AND services_bitemporal.__START_AT <= incident.t\n",
+                  "    AND (services_bitemporal.__END_AT > incident.t OR services_bitemporal.__END_AT IS NULL)\n",
+                  "    AND services_bitemporal.__SYSTEM_START_AT <= incident.t\n",
+                  "    AND (services_bitemporal.__SYSTEM_END_AT > incident.t OR services_bitemporal.__SYSTEM_END_AT IS NULL)\n",
+                  "),\n",
+                  "first_named AS (\n",
+                  "  SELECT services_bitemporal.version, min(services_bitemporal.__SYSTEM_START_AT) AS first_start\n",
+                  "  FROM ${var.catalog}.silver.services_bitemporal\n",
+                  "  WHERE services_bitemporal.service = 'checkout'\n",
+                  "  GROUP BY services_bitemporal.version\n",
+                  ")\n",
+                  "SELECT\n",
+                  "  answers.question,\n",
+                  "  answers.version,\n",
+                  "  CASE WHEN answers.live_start IS NULL THEN 'open'\n",
+                  "       WHEN answers.live_start < incident.t - INTERVAL 25 SECONDS THEN 'before the run'\n",
+                  "       ELSE format_string('14:%02d', CAST(floor(round(300 + (unix_micros(answers.live_start) - unix_micros(incident.t)) * 12 / 1000000) / 60) AS INT))\n",
+                  "  END AS live_from,\n",
+                  "  CASE WHEN answers.live_end IS NULL THEN 'open'\n",
+                  "       WHEN answers.live_end < incident.t - INTERVAL 25 SECONDS THEN 'before the run'\n",
+                  "       ELSE format_string('14:%02d', CAST(floor(round(300 + (unix_micros(answers.live_end) - unix_micros(incident.t)) * 12 / 1000000) / 60) AS INT))\n",
+                  "  END AS live_until,\n",
+                  "  CASE WHEN answers.known_start IS NULL THEN 'open'\n",
+                  "       WHEN answers.known_start < incident.t - INTERVAL 25 SECONDS THEN 'before the run'\n",
+                  "       ELSE format_string('14:%02d', CAST(floor(round(300 + (unix_micros(answers.known_start) - unix_micros(incident.t)) * 12 / 1000000) / 60) AS INT))\n",
+                  "  END AS known_from,\n",
+                  "  CASE WHEN answers.known_end IS NULL THEN 'open'\n",
+                  "       WHEN answers.known_end < incident.t - INTERVAL 25 SECONDS THEN 'before the run'\n",
+                  "       ELSE format_string('14:%02d', CAST(floor(round(300 + (unix_micros(answers.known_end) - unix_micros(incident.t)) * 12 / 1000000) / 60) AS INT))\n",
+                  "  END AS known_until,\n",
+                  "  CASE WHEN first_named.first_start < incident.t - INTERVAL 25 SECONDS THEN 'before the run'\n",
+                  "       ELSE format_string('14:%02d', CAST(floor(round(300 + (unix_micros(first_named.first_start) - unix_micros(incident.t)) * 12 / 1000000) / 60) AS INT))\n",
+                  "  END AS first_known\n",
+                  "FROM answers CROSS JOIN incident\n",
+                  "JOIN first_named ON first_named.version = answers.version"
+                ],
+                "usage_guidance": [
+                  "Only when the user asks for the scenario clock (14:00 to 14:20 of the story): the two postmortem answers with their periods converted from UTC, anchored at the latest checkout incident, which opened at 14:05. known_from is when the catalog recorded that row, not when it first named the version; first_known is when it first named it."
                 ]
               }
             ]

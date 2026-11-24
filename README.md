@@ -24,7 +24,8 @@ Phase 3 done (2026-11-22): the Lakeflow pipeline in the bundle, SQL on serverles
 2.4.1 for the version that was live and 2.4.0 for what the catalog said, and the deleted incident leaves SCD1.
 Phase 4 done (2026-11-24): a Genie Agent in the bundle over the Phase 3 tables; Genie One sends the postmortem
 question to it and answers 2.4.1 for the version that was live and 2.4.0 for what the catalog said, in English and
-in Portuguese.
+in Portuguese. Extended the same day with the OpenTelemetry logs and spans and with the table of the bitemporal post
+on the scenario clock, which Genie One returns through the agent when the question names the incident.
 
 ## Phase 0
 
@@ -116,15 +117,28 @@ system-time filter changes.
 
 A Genie Agent in the bundle (`bundle/resources/oncall.genie.yml`, the `genie_spaces` resource, Databricks CLI 1.3.0 or
 later with the direct deployment engine): five Phase 3 tables (`gold.incident_postmortem`, `gold.errors_by_version`,
-`gold.service_health`, `gold.hop_latency`, `silver.services_bitemporal`) with column descriptions, five sample questions
-with example SQL and one block of instructions. Its warehouse is `WAREHOUSE_ID` of `.env`, a pro or serverless one.
+`gold.service_health`, `gold.hop_latency`, `silver.services_bitemporal`) and two OpenTelemetry tables
+(`otel.shop_otel_logs`, `otel.shop_otel_spans`) with column descriptions, eight sample questions with example SQL
+and one block of instructions. `check` runs every example SQL on the warehouse before a deploy. Its warehouse is
+`WAREHOUSE_ID` of `.env`, a pro or serverless one. The scenario clock example returns the six columns of the bitemporal
+post and `first_known`, when the catalog first named each version.
 
 ```bash
 python setup/04_genie.py check           # read-only: tables, the expected answer, warehouse, CLI, the agent
 python setup/04_genie.py run             # deploys the bundle and asks the agent the postmortem question
+python setup/04_genie.py agent           # asks the agent directly, without Genie One in between
 python setup/04_genie.py ask             # asks Genie One the same question (databricks genie ask)
+python setup/04_genie.py ask "QUESTION"  # another question for Genie One, in quotes
+python setup/04_genie.py chats           # opens the Genie One chats of the saved answers, to delete them there
 ```
 
 Phase 4 closes when Genie One answers the postmortem question correctly: 2.4.1 was live when the latest
 "Checkout error rate above 5%" incident opened, and the catalog named 2.4.0 at that moment. The question names the
 incident instead of 14:05 because the tables keep the real time of the run, in UTC.
+
+Genie One first looks for a Genie Agent relevant to the question, and it draws on your past conversations. `ask` says
+whether it handed the question to this agent (`ask_genie_space`) and whether it read an earlier chat (`episode_fetch`).
+For a test from scratch, delete the earlier chats first: `chats` opens in the browser the chats of the saved answers
+that it has not opened before (`--all` opens them all again), and the rest are in the Genie One sidebar. When Genie One
+did not use this agent, `ask` prints only the first lines of the answer, with other catalogs masked, since it is about
+other assets of the workspace; the `.local` file keeps it all.
