@@ -7,8 +7,7 @@
 #
 # -----------------------------------------------------------------------------
 """Declarative Automation Bundle and Lakeflow pipeline helpers for the setup scripts from Phase 3 on: deploy the
-bundle, find a pipeline it deployed, run an update and read why it failed, with output safe to paste in a chat.
-(setup/00_environment.py keeps its own copy of the update loop, as Phase 0 closed with it.)"""
+bundle, find a pipeline it deployed, run an update and read why it failed, with output safe to paste in a chat."""
 from __future__ import annotations
 
 import json

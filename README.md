@@ -16,7 +16,7 @@ as it arrives, with the latency of each hop.
 
 Part 2 of [zerobus-postgres-cdc](https://github.com/ThomazRossito/zerobus-postgres-cdc).
 
-Status: Phase 0 done (2026-11-20): environment check, Unity Catalog setup and the AUTO CDC bitemporal test.
+Status: Phase 0 done (2026-11-20): environment check and Unity Catalog setup.
 Phase 1 done (2026-11-20): CDC source and shop simulator; two runs with seed 42 produce the same events.
 Phase 2 done (2026-11-20): CDC and OpenTelemetry through Zerobus Ingest; commit → bronze latency p50 5.4 s, p95 8.2 s;
 the test plan of [debezium/dbz#3026](https://github.com/debezium/dbz/issues/3026) on Debezium Server 3.8.0.Alpha2.
@@ -31,9 +31,14 @@ conda activate zerobus-nrt-oncall
 cp .env.example .env
 python setup/00_environment.py check
 python setup/00_environment.py create
-python setup/00_environment.py bitemporal
 python setup/00_environment.py check
 ```
+
+Until 2026-11-24, Phase 0 also deployed a two-row AUTO CDC bitemporal test pipeline. It left the bundle because the
+Phase 3 pipeline answers the same two questions with the project's data. If you ran it, run
+`databricks bundle deploy --var catalog=<your catalog>` once from `bundle/` and confirm if the CLI asks: it deletes the
+`zerobus_nrt_oncall_phase0_bitemporal` pipeline. A deleted pipeline keeps its tables, so then drop
+`bronze.phase0_bitemporal_source` and `silver.phase0_bitemporal`.
 
 ## Phase 1
 

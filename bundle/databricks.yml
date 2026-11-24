@@ -9,7 +9,7 @@
 # zerobus-nrt-oncall · what the project creates in Databricks (Declarative Automation Bundle)
 #
 # Run it through the setup scripts, which read the CLI profile and the catalog from .env:
-#   python setup/00_environment.py bitemporal     # phase 0: AUTO CDC bitemporal test pipeline
+#   python setup/03_pipeline.py run               # phase 3: the on-call pipeline, then one update
 # No workspace.host here: the workspace is the one of the CLI profile.
 # Catalog and schemas stay out of the bundle on purpose: a "bundle destroy" never drops data.
 
